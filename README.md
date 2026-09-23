@@ -1,44 +1,32 @@
+# Embedded projects
 
-Apps developed using the [Resident](https://resident.inanimate.tech/#try-it-now) prototyping framework.
+A single repo for my embedded / hardware projects. Each top-level folder is a
+self-contained project for one device + toolchain combination, with its own
+README, build config, and helper scripts.
 
-# How does this work?
+## Projects
 
-This repo does not contain the Resident library and repo, instead it is a fork of the `resident/examples/m5stack-demo` in order to reuse their built device drivers.
+| Folder | Device | Toolchain | Notes |
+| --- | --- | --- | --- |
+| [`m5stack-resident/`](m5stack-resident/) | M5StickS3 (ESP32-S3) | PlatformIO + [Resident](https://resident.inanimate.tech/) | Lua apps pushed over the Resident relay |
 
-# How to do things?
+## Conventions
 
-## Building 
+- **One folder per device + toolchain**, named `<device>-<toolchain>`
+  (e.g. `m5stack-resident`, `m5stack-arduino`, `rp2040-pico-sdk`, `esp32-idf`).
+  If the same device is used with a different toolchain, it gets its own folder.
+- **Everything a project needs lives inside its folder**: build config
+  (`platformio.ini`, `CMakeLists.txt`, ...), scripts, docs, and local state
+  such as device IDs or cached checkouts.
+- **Run commands from inside the project folder.** Scripts use paths relative
+  to their project, so `cd <project>` first.
+- **Each project has a `README.md`** covering: hardware, toolchain install,
+  build/flash steps, and how to deploy apps.
+- Local-only files (`external/` checkouts, `.pio/`, `build/`, device IDs) are
+  git-ignored repo-wide — see [`.gitignore`](.gitignore).
 
-1. You need to install `pio` ([PlatformIO](https://docs.platformio.org/en/stable/core/installation/index.html))
-2. Plug in the M5StickS3
-3. `cd device && pio run -e m5sticks3 -t upload`
+## Adding a new project
 
-## Device Initialization
-
-1. First boot with no saved credentials → Courier's WiFiManager opens a captive-portal access point named Resident <deviceType> <id-suffix> (e.g. Resident stick a1b2c3d4).
-2. Join that AP from your phone/laptop, the captive portal page prompts for your real WiFi SSID/password.
-3. Credentials are saved to NVS (flash) — subsequent boots reconnect automatically, no portal.
-4. Once WiFi is up, it opens a WebSocket to resident.inanimate.tech (or your RESIDENT_HOST) and the status display (your DisplayDriver) cycles WiFi → Connecting → Connected → <8-char device ID>.
-5. From there, push apps with /resident:push-app --device-id <id> some-app.lua or ./send-app.sh --device-id <id> device-apps/hello.lua (device ID is also cached in .resident-device-id after the skill talks to it once).
-
-## Build Dependencies
-
-Using Platform IO, the dependencies are downloaded by `pio` to `device/.pio` and then the whole firmware is built from there. So there is not need to checkout any of the dependencies unless we are modifying it.
-
-## Deploy app through inanimate resident
-
-On claude code, run `/resident:push-app <name of the app>` or 
-`./send-app.sh device-apps/<name-of-app>.lua` 
-
-Ensure the device ID is in `resident/.resident-device-id`.
-
-## Auto-load last app
-
-Since resident 0.5, it will auto-load the last app that was uploaded after a 20s countdown.
-
-## Physical buttons on the M5StickS3.
-
-- Power Button (small button on the side of the device)
-  - Double press to power off
-  - Long press to boot or reboot.
-  - Single press to turn on OR reboot
+1. `mkdir <device>-<toolchain>` at the repo root.
+2. Add a `README.md` following the sections above.
+3. Add a row to the **Projects** table.

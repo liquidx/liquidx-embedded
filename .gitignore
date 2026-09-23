@@ -1,6 +1,21 @@
-.resident-device-id
-.pio
 .DS_Store
 
-# local checkouts
+# local checkouts (per project)
 external/
+
+# device-specific local state
+.resident-device-id
+
+# PlatformIO
+.pio/
+
+# CMake / ESP-IDF / Pico SDK / Zephyr build output
+build/
+sdkconfig.old
+
+# Arduino CLI
+.arduino/
+
+# Python virtualenvs (MicroPython / CircuitPython tooling)
+.venv/
+__pycache__/
