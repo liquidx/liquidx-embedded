@@ -9,6 +9,7 @@ README, build config, and helper scripts.
 | Folder | Device | Toolchain | Notes |
 | --- | --- | --- | --- |
 | [`m5stack-resident/`](m5stack-resident/) | M5StickS3 (ESP32-S3) | PlatformIO + [Resident](https://resident.inanimate.tech/) | Lua apps pushed over the Resident relay |
+| [`xteink-x4-platformio/`](xteink-x4-platformio/) | Xteink X4 (ESP32-C3, e-paper) | PlatformIO + [FreeInk SDK](https://github.com/Free-Ink/freeink-sdk) | Landscape shell firmware: image viewer, settings |
 
 ## Conventions
 

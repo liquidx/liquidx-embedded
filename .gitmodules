@@ -1,0 +1,3 @@
+[submodule "xteink-x4-platformio/freeink-sdk"]
+	path = xteink-x4-platformio/freeink-sdk
+	url = https://github.com/Free-Ink/freeink-sdk.git

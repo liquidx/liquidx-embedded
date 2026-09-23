@@ -19,3 +19,9 @@ sdkconfig.old
 # Python virtualenvs (MicroPython / CircuitPython tooling)
 .venv/
 __pycache__/
+
+# clangd compile database (regenerate: pio run -t compiledb)
+compile_commands.json
+
+# clangd index cache
+.cache/

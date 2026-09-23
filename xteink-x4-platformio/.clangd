@@ -1,0 +1,3 @@
+# compile_commands.json comes from GCC (pio run -t compiledb); drop flags clang rejects.
+CompileFlags:
+  Remove: [-mlongcalls, -mdisable-hardware-atomics, -fstrict-volatile-bitfields, -fno-tree-switch-conversion, -fno-shrink-wrap, -mtext-section-literals]
