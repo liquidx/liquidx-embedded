@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 
+#include "../ui/Widgets.h"
 #include "Input.h"
 #include "Layout.h"
 
@@ -12,37 +13,31 @@ enum class Result : uint8_t {
   CleanRedraw,  // repaint with a half refresh to clear ghosting (new image, new page)
 };
 
-// Labels for the front keys, top to bottom. nullptr means the key does nothing
-// right now (drawn as a faint stub). The shell fills in `back` itself.
-struct KeyHints {
-  const char* back;
-  const char* select;
-  const char* up;
-  const char* down;
-};
-
-// An app owns the whole content area while open. The shell owns the home
-// list, the key-hint gutter, chrome visibility and refresh.
+// An app owns its page card while open. The shell owns home, the gutter, the
+// card stack, chrome visibility and refresh.
 class App {
  public:
   virtual ~App() = default;
 
   virtual const char* name() const = 0;
 
+  // Glyph and item count shown on the app's home row. A negative count hides it.
+  virtual ui::Icon icon() const { return ui::Icon::None; }
+  virtual int itemCount() { return -1; }
+
   // Called each time the app is opened from home. Reset to the top level.
   virtual void onOpen() {}
 
-  // Draw into `area` (already cleared to white). With `chrome` off, skip
-  // titles, captions and other decoration: show just the content.
+  // Draw into `area` (already cleared to white and clipped): the top card, or
+  // the whole screen with `chrome` off. With `chrome` off, skip titles,
+  // captions and other decoration: show just the content.
   virtual void render(GfxRenderer& r, const layout::Rect& area, bool chrome) = 0;
 
-  // Select / Up / Down, plus Back while canGoBack() is true. Back at the top
-  // level never reaches the app: the shell takes it as Home.
+  // Select / Up / Down, plus Back while depth() > 0. Back at the top level
+  // never reaches the app: the shell takes it as Home.
   virtual Result handle(Action action) = 0;
 
-  // True once the user has drilled into a sub-screen; the first key becomes Back.
-  virtual bool canGoBack() const { return false; }
-
-  // Labels for Select / Up / Down in the current state (`back` is ignored).
-  virtual KeyHints hints() const = 0;
+  // How many pages the user has drilled in below the app's top level. Each one
+  // adds a card to the visible back stack.
+  virtual int depth() const { return 0; }
 };

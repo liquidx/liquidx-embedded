@@ -13,38 +13,62 @@
 namespace {
 
 constexpr const char* kDir = "/images";
-constexpr int kCaptionH = 28;
+
+// Caption pills, bottom-left of the card (docs/design/02-images.png).
+constexpr int kPillX = 28;
+constexpr int kPillGap = 8;
+constexpr int kPillBottom = 29;  // from the bottom of the card
 
 bool isBmp(const char* name) {
   const size_t len = strlen(name);
   return len > 4 && strcasecmp(name + len - 4, ".bmp") == 0;
 }
 
-void drawMessage(GfxRenderer& r, const layout::Rect& area, const char* title, const char* body) {
-  const int x = area.x + layout::kPad * 2;
-  int y = area.h / 2 - r.getLineHeight(fonts::TITLE_18);
-  r.drawText(fonts::TITLE_18, x, y, title, true, EpdFontFamily::BOLD);
-  y += r.getLineHeight(fonts::TITLE_18) + 8;
-  for (const auto& line : r.wrappedText(fonts::BODY_14, body, area.w - layout::kPad * 4, 4)) {
-    r.drawText(fonts::BODY_14, x, y, line.c_str());
-    y += r.getLineHeight(fonts::BODY_14);
+void drawMessage(GfxRenderer& r, const layout::Rect& area, const bool chrome, const char* title, const char* body) {
+  const int top = ui::drawTitle(r, area, chrome ? "Images" : nullptr);
+  const int x = area.x + layout::kMarginLeft;
+  int baseline = top + 40;
+  ui::drawTextAt(r, fonts::MEDIUM_22, x, baseline, title);
+  baseline += 34;
+  for (const auto& line : r.wrappedText(fonts::SMALL_15, body, 290, 4)) {
+    ui::drawTextAt(r, fonts::SMALL_15, x, baseline, line.c_str());
+    baseline += 19;
   }
+}
+
+// Draw the bitmap scaled and centre-cropped to cover `area`. drawBitmap only
+// scales down, so small images are centred instead.
+bool drawCover(GfxRenderer& r, Bitmap& bitmap, const layout::Rect& area) {
+  const float bw = bitmap.getWidth(), bh = bitmap.getHeight();
+  const float areaAspect = static_cast<float>(area.w) / area.h;
+  float cropX = 0, cropY = 0;
+  if (bw / bh > areaAspect) {
+    cropX = 1.0f - areaAspect * bh / bw;
+  } else {
+    cropY = 1.0f - bw / (areaAspect * bh);
+  }
+  const float cw = bw * (1 - cropX), ch = bh * (1 - cropY);
+  const float scale = std::min(1.0f, area.w / cw);
+  const int w = static_cast<int>(cw * scale), h = static_cast<int>(ch * scale);
+  return r.drawBitmap(bitmap, area.x + (area.w - w) / 2, area.y + (area.h - h) / 2, area.w, area.h, cropX, cropY);
 }
 
 }  // namespace
 
-const char* ImageApp::fileLabel(const void* ctx, const int index) {
-  return static_cast<const ImageApp*>(ctx)->files_[index].c_str();
+int ImageApp::itemCount() {
+  // Home asks before the app is ever opened; scan once, then onOpen refreshes it.
+  if (!scanned_) scan();
+  return Storage.ready() ? static_cast<int>(files_.size()) : -1;
 }
 
 void ImageApp::onOpen() {
   // Rescan on every open so swapping SD contents is picked up.
-  viewing_ = false;
-  list_.reset();
   scan();
+  index_ = std::clamp(index_, 0, std::max(0, static_cast<int>(files_.size()) - 1));
 }
 
 void ImageApp::scan() {
+  scanned_ = true;
   files_.clear();
   if (!Storage.ready()) return;
 
@@ -65,74 +89,42 @@ void ImageApp::scan() {
 
 void ImageApp::render(GfxRenderer& r, const layout::Rect& area, const bool chrome) {
   if (!Storage.ready()) {
-    drawMessage(r, area, "No SD card", "Insert a card and reopen Images.");
-  } else if (files_.empty()) {
-    drawMessage(r, area, "No images", "Copy .bmp files to /images on the SD card.");
-  } else if (viewing_) {
-    renderViewer(r, area, chrome);
-  } else {
-    list_.render(r, area, chrome ? "Images" : nullptr, static_cast<int>(files_.size()), fileLabel, this);
+    drawMessage(r, area, chrome, "No SD card", "Insert a card and reopen Images.");
+    return;
   }
-}
+  if (files_.empty()) {
+    drawMessage(r, area, chrome, "No images", "Copy .bmp files to /images on the SD card.");
+    return;
+  }
 
-void ImageApp::renderViewer(GfxRenderer& r, const layout::Rect& area, const bool chrome) const {
-  const int index = list_.selected();
-  const std::string path = std::string(kDir) + "/" + files_[index];
-  const int maxW = area.w;
-  const int maxH = area.h - (chrome ? kCaptionH : 0);
-
+  const std::string path = std::string(kDir) + "/" + files_[index_];
   HalFile file;
   bool drawn = false;
   if (Storage.openFileForRead("IMG", path.c_str(), file)) {
     Bitmap bitmap(file, true);
     const auto err = bitmap.parseHeaders();
     if (err == BmpReaderError::Ok) {
-      // drawBitmap scales down to fit; centre using the fitted size.
-      const float scale = std::min(1.0f, std::min(static_cast<float>(maxW) / bitmap.getWidth(),
-                                                   static_cast<float>(maxH) / bitmap.getHeight()));
-      const int w = static_cast<int>(bitmap.getWidth() * scale);
-      const int h = static_cast<int>(bitmap.getHeight() * scale);
-      drawn = r.drawBitmap(bitmap, area.x + (maxW - w) / 2, area.y + (maxH - h) / 2, maxW, maxH);
+      drawn = drawCover(r, bitmap, area);
     } else {
       LOG_ERR("IMG", "%s: %s", path.c_str(), Bitmap::errorToString(err));
     }
     file.close();
   }
-  if (!drawn) drawMessage(r, area, "Can't show image", files_[index].c_str());
+  if (!drawn) drawMessage(r, area, chrome, "Can't show image", files_[index_].c_str());
 
   if (chrome) {
-    char caption[300];
-    snprintf(caption, sizeof(caption), "%d / %d   %s", index + 1, static_cast<int>(files_.size()),
-             files_[index].c_str());
-    const auto text = r.truncatedText(fonts::UI_10, caption, area.w - layout::kPad * 2);
-    r.drawText(fonts::UI_10, area.x + layout::kPad, area.y + area.h - kCaptionH + 4, text.c_str());
+    const int countY = area.y + area.h - kPillBottom - ui::kPillH;
+    const auto name = r.truncatedText(fonts::SMALL_15, files_[index_].c_str(), area.w / 2);
+    ui::drawPill(r, fonts::SMALL_15, area.x + kPillX, countY - kPillGap - ui::kPillH, name.c_str());
+    char counter[24];
+    snprintf(counter, sizeof(counter), "%d / %d", index_ + 1, static_cast<int>(files_.size()));
+    ui::drawPill(r, fonts::SMALL_15, area.x + kPillX, countY, counter, false);
   }
-}
-
-KeyHints ImageApp::hints() const {
-  if (files_.empty()) return {};
-  const bool canStep = files_.size() > 1;
-  if (viewing_) return {nullptr, nullptr, canStep ? "Prev" : nullptr, canStep ? "Next" : nullptr};
-  return {nullptr, "View", canStep ? "Up" : nullptr, canStep ? "Down" : nullptr};
 }
 
 Result ImageApp::handle(const Action action) {
-  if (files_.empty()) return Result::Ignored;
   const int count = static_cast<int>(files_.size());
-  switch (action) {
-    case Action::Up:
-    case Action::Down:
-      // The viewer shares the list selection, so Back lands on the last image seen.
-      if (!list_.move(action == Action::Up ? -1 : 1, count)) return Result::Ignored;
-      return viewing_ ? Result::CleanRedraw : Result::Redraw;
-    case Action::Select:
-      if (viewing_) return Result::Ignored;
-      viewing_ = true;
-      return Result::CleanRedraw;
-    case Action::Back:
-      viewing_ = false;
-      return Result::CleanRedraw;
-    default:
-      return Result::Ignored;
-  }
+  if (count < 2 || (action != Action::Up && action != Action::Down)) return Result::Ignored;
+  index_ = (index_ + (action == Action::Up ? -1 : 1) + count) % count;
+  return Result::CleanRedraw;
 }

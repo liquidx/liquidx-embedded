@@ -8,11 +8,11 @@ the `freeink-sdk` submodule, not from here.
 | Library | Why it's here | Local changes |
 | --- | --- | --- |
 | `GfxRenderer` | Drawing, text, BMP decode, landscape orientation | none |
-| `EpdFont` | Bitmap font rendering | Kept only Ubuntu 10/12 and Noto Sans 14/18 (regular + bold); dropped font sources and generator scripts |
+| `EpdFont` | Bitmap font rendering | Replaced the built-in fonts with IBM Plex Mono made by `scripts/fontconvert.py`; dropped font sources and CrossPoint's generator scripts |
 | `hal` | Thin layer over the SDK used by `GfxRenderer` | Dropped `HalClock`, `HalFrontlight`, `HalSystem` (panic capture), `HalTiltSensor`; `HalGPIO.h` gained `beginAsyncInput()`/`popPress()` pass-throughs to the SDK's background button sampling |
 | `Logging`, `Utf8`, `Memory` | Required by the above | none |
 | `MiniBidi`, `InflateReader`, `uzlib` | Required by `GfxRenderer` text layout and compressed fonts | none |
 
-To regenerate fonts or pull in another CrossPoint font, see
-`lib/EpdFont/scripts/` in the CrossPoint repo, then add the header to
+The built-in fonts are regenerated from `fonts/IBMPlexMono/` by
+`scripts/fonts.sh`. To add a size, add a line there, then include the header in
 `EpdFont/builtinFonts/all.h` and register it in `src/Fonts.cpp`.

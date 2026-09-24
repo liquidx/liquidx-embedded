@@ -5,24 +5,20 @@
 
 namespace {
 
-EpdFont ui10Regular(&ubuntu_10_regular);
-EpdFont ui10Bold(&ubuntu_10_bold);
-EpdFont ui12Regular(&ubuntu_12_regular);
-EpdFont ui12Bold(&ubuntu_12_bold);
-EpdFont body14Regular(&notosans_14_regular);
-EpdFont body14Bold(&notosans_14_bold);
-EpdFont title18Regular(&notosans_18_regular);
-EpdFont title18Bold(&notosans_18_bold);
+EpdFont small15(&plexmono_15_regular);
+EpdFont label15(&plexmono_15_label);
+EpdFont medium22(&plexmono_22_medium);
+EpdFont display136(&plexmono_136_display);
 
 }  // namespace
 
 namespace fonts {
 
 void registerAll(GfxRenderer& renderer) {
-  renderer.insertFont(UI_10, EpdFontFamily(&ui10Regular, &ui10Bold));
-  renderer.insertFont(UI_12, EpdFontFamily(&ui12Regular, &ui12Bold));
-  renderer.insertFont(BODY_14, EpdFontFamily(&body14Regular, &body14Bold));
-  renderer.insertFont(TITLE_18, EpdFontFamily(&title18Regular, &title18Bold));
+  renderer.insertFont(SMALL_15, EpdFontFamily(&small15));
+  renderer.insertFont(LABEL_15, EpdFontFamily(&label15));
+  renderer.insertFont(MEDIUM_22, EpdFontFamily(&medium22));
+  renderer.insertFont(DISPLAY_136, EpdFontFamily(&display136));
 }
 
 }  // namespace fonts

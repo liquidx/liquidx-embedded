@@ -1,17 +1,27 @@
 #include "Shell.h"
 
+#include <Arduino.h>
 #include <HalPowerManager.h>
 
+#include <algorithm>
 #include <cstdio>
 
 #include "../Fonts.h"
+#include "../Settings.h"
 
 namespace {
 
-// Fast refreshes leave ghosting; force a half refresh after this many.
-constexpr int kMaxFastRefreshes = 12;
+// Home screen geometry (docs/design/01-home.png).
+constexpr int kHomeRight = 37;  // rows stop this far from the card edge
+constexpr int kPillY = 32;
+constexpr int kClockBaseline = 242;
+constexpr int kRowsY = 320;
+constexpr int kRowsVisible = 2;
 
-const char* appName(const void* ctx, const int index) { return static_cast<App* const*>(ctx)[index]->name(); }
+constexpr unsigned long kClockPollMs = 1000;
+
+const char* const kWeekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+const char* const kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
 }  // namespace
 
@@ -19,7 +29,10 @@ void Shell::addApp(App* app) {
   if (appCount_ < kMaxApps) apps_[appCount_++] = app;
 }
 
-void Shell::begin() { redraw(true); }
+void Shell::begin() {
+  rtc_.begin();
+  redraw(true);
+}
 
 void Shell::invalidate(const bool clean) {
   dirty_ = true;
@@ -32,6 +45,20 @@ bool Shell::flush() {
   dirty_ = dirtyClean_ = false;
   redraw(clean);
   return true;
+}
+
+int Shell::clockMinute() const {
+  Rtc::DateTime now;
+  if (!rtc_.now(now)) return -1;
+  return now.hour * 60 + now.minute;
+}
+
+void Shell::tick() {
+  if (current_ != nullptr) return;
+  const unsigned long now = millis();
+  if (now - lastClockPollMs_ < kClockPollMs) return;
+  lastClockPollMs_ = now;
+  if (clockMinute() != shownMinute_) invalidate();
 }
 
 void Shell::dispatch(const Action action) {
@@ -47,11 +74,14 @@ void Shell::dispatch(const Action action) {
     switch (action) {
       case Action::Up:
       case Action::Down:
-        if (home_.move(action == Action::Up ? -1 : 1, appCount_)) invalidate();
+        if (appCount_ > 1) {
+          selected_ = (selected_ + (action == Action::Up ? -1 : 1) + appCount_) % appCount_;
+          invalidate();
+        }
         break;
       case Action::Select:
         if (appCount_ > 0) {
-          current_ = apps_[home_.selected()];
+          current_ = apps_[selected_];
           current_->onOpen();
           invalidate();
         }
@@ -62,7 +92,7 @@ void Shell::dispatch(const Action action) {
     return;
   }
 
-  if (action == Action::Back && !current_->canGoBack()) {
+  if (action == Action::Back && current_->depth() == 0) {
     current_ = nullptr;
     invalidate();
     return;
@@ -72,103 +102,124 @@ void Shell::dispatch(const Action action) {
   if (result != Result::Ignored) invalidate(result == Result::CleanRedraw);
 }
 
-layout::Rect Shell::contentArea() const { return chrome_ ? layout::kContentWithChrome : layout::kFullScreen; }
-
-KeyHints Shell::currentHints() const {
-  if (current_ == nullptr) {
-    const bool canMove = appCount_ > 1;
-    return {nullptr, appCount_ > 0 ? "Open" : nullptr, canMove ? "Up" : nullptr, canMove ? "Down" : nullptr};
-  }
-  KeyHints hints = current_->hints();
-  hints.back = current_->canGoBack() ? "Back" : "Home";
-  return hints;
+int Shell::depth() const {
+  if (current_ == nullptr) return 0;
+  return std::min(layout::kMaxDepth, 1 + current_->depth());
 }
 
 void Shell::redraw(const bool clean) {
   renderer_.clearScreen();
-  const auto area = contentArea();
+  const auto area = chrome_ ? layout::cardArea(depth()) : layout::kFullScreen;
   renderer_.setClipRect(area.x, area.y, area.w, area.h);
   if (current_ == nullptr) {
-    home_.render(renderer_, area, chrome_ ? "Home" : nullptr, appCount_, appName, apps_);
+    drawHome(area);
   } else {
     current_->render(renderer_, area, chrome_);
   }
   renderer_.setClipRect(0, 0, layout::kScreenW, layout::kScreenH);
-  if (chrome_) drawGutter();
+  if (chrome_) {
+    drawCardStack(depth());
+    drawGutter();
+  }
   present(clean);
 }
 
+void Shell::drawHome(const layout::Rect& area) {
+  Rtc::DateTime now;
+  const bool haveTime = rtc_.now(now);
+  shownMinute_ = haveTime ? now.hour * 60 + now.minute : -1;
+  const int x = area.x + layout::kMarginLeft;
+
+  char date[16];
+  if (haveTime) {
+    snprintf(date, sizeof(date), "%s %u %s", kWeekdays[now.weekday % 7], now.day, kMonths[(now.month + 11) % 12]);
+  } else {
+    snprintf(date, sizeof(date), "Clock not set");
+  }
+  ui::drawPill(renderer_, fonts::SMALL_15, x, area.y + kPillY, date);
+
+  char clock[8];
+  if (!haveTime) {
+    snprintf(clock, sizeof(clock), "--:--");
+  } else if (settings::value(settings::kClock) == 12) {
+    snprintf(clock, sizeof(clock), "%u:%02u", now.hour % 12 == 0 ? 12 : now.hour % 12, now.minute);
+  } else {
+    snprintf(clock, sizeof(clock), "%02u:%02u", now.hour, now.minute);
+  }
+  ui::drawTextAt(renderer_, fonts::DISPLAY_136, x, area.y + kClockBaseline, clock);
+
+  // App rows, a page of kRowsVisible at a time.
+  const auto& style = ui::kHomeRow;
+  const int w = area.w - layout::kMarginLeft - kHomeRight;
+  const int first = selected_ / kRowsVisible * kRowsVisible;
+  for (int i = first; i < std::min(appCount_, first + kRowsVisible); i++) {
+    char count[12] = "";
+    const int n = apps_[i]->itemCount();
+    if (n >= 0) snprintf(count, sizeof(count), "%d", n);
+    const layout::Rect row{x, area.y + kRowsY + (i - first) * style.pitch, w, style.height};
+    ui::drawRow(renderer_, row, style, apps_[i]->icon(), apps_[i]->name(), count, i == selected_);
+  }
+}
+
+void Shell::drawCardStack(const int depth) const {
+  // Cards bleed off the top, bottom and left, so only the right corners show.
+  constexpr int R = layout::kCardRadius;
+  constexpr int kBleed = R + 2;
+  // Square off whatever the top page drew outside its rounded corners...
+  renderer_.maskRoundedRectOutsideCorners(-kBleed, -1, layout::cardWidth(depth) + kBleed, layout::kScreenH + 2, R,
+                                          Color::White);
+  // ...then outline every card in the stack; lower ones peek out to the right.
+  for (int d = 0; d <= depth; d++) {
+    renderer_.drawRoundedRect(-kBleed, -1, layout::cardWidth(d) + kBleed, layout::kScreenH + 2, 1, R, true);
+  }
+}
+
 void Shell::drawGutter() const {
-  // Battery above the first key.
-  char battery[16];
-  snprintf(battery, sizeof(battery), "%u%%", powerManager.getBatteryPercentage());
-  const int batteryW = renderer_.getTextWidth(fonts::UI_10, battery);
-  renderer_.drawText(fonts::UI_10, layout::kGutterX + (layout::kGutterW - batteryW) / 2, 22, battery);
+  // Battery gauge above the first key.
+  constexpr int kBattX = 751, kBattY = 24, kBattW = 26, kBattH = 14;
+  renderer_.drawRoundedRect(kBattX, kBattY, kBattW, kBattH, 1, 2, true);
+  renderer_.fillRect(kBattX + kBattW + 1, kBattY + 5, 2, 4);
+  const int level = std::clamp<int>(powerManager.getBatteryPercentage(), 0, 100);
+  renderer_.fillRect(kBattX + 3, kBattY + 3, (kBattW - 6) * level / 100, kBattH - 6);
 
-  const KeyHints hints = currentHints();
-  const char* labels[layout::kKeyCount] = {hints.back, hints.select, hints.up, hints.down};
-  const bool homeIcon = current_ != nullptr && !current_->canGoBack();
-
-  // Tabs run from just inside the gutter to the bezel edge, rounded on the side
-  // facing the screen so they read as pointing at the key.
-  const int tabX = layout::kGutterX + 4;
-  const int tabW = layout::kScreenW - layout::kBezelRight - tabX;
-  constexpr int kRadius = 10;
-  constexpr int kIcon = 7;  // half-size of the glyph drawn in each tab
-
+  // All four keys are always shown, even when inert on this page.
+  constexpr int R = layout::kKeyRadius;
+  const int cx = layout::kKeyCenterX;
   for (int i = 0; i < layout::kKeyCount; i++) {
     const auto& slot = layout::kKeySlots[i];
-    if (labels[i] == nullptr || labels[i][0] == '\0') {
-      // Inactive key: a faint stub so the key position is still visible.
-      renderer_.fillRectDither(layout::kScreenW - layout::kBezelRight - 6, slot.y + 20, 6, slot.h - 40,
-                               Color::LightGray);
-      continue;
-    }
+    const int cy = slot.y + slot.h / 2;
+    renderer_.fillRoundedRect(cx - R, cy - R, R * 2, R * 2, R, Color::Black);
 
-    renderer_.fillRoundedRect(tabX, slot.y, tabW, slot.h, kRadius, true, false, true, false, Color::Black);
-
-    // Glyph per key, label per context. All glyphs are drawn white on the tab.
-    const int cx = tabX + tabW / 2;
-    const int cy = slot.y + 24;
     switch (i) {
-      case 0:
-        if (homeIcon) {
-          // House: roof triangle over a square body.
-          const int xs[] = {cx - kIcon - 1, cx + kIcon + 1, cx};
-          const int ys[] = {cy - 1, cy - 1, cy - kIcon - 1};
-          renderer_.fillPolygon(xs, ys, 3, false);
-          renderer_.fillRect(cx - kIcon + 2, cy - 1, kIcon * 2 - 4, kIcon, false);
-        } else {
-          const int xs[] = {cx + kIcon, cx + kIcon, cx - kIcon};
-          const int ys[] = {cy - kIcon, cy + kIcon, cy};
-          renderer_.fillPolygon(xs, ys, 3, false);
-        }
-        break;
-      case 1:
-        renderer_.fillRoundedRect(cx - kIcon, cy - kIcon, kIcon * 2, kIcon * 2, kIcon, Color::White);
-        break;
-      case 2: {
-        const int xs[] = {cx - kIcon, cx + kIcon, cx};
-        const int ys[] = {cy + kIcon / 2, cy + kIcon / 2, cy - kIcon};
+      case 0: {  // ◀ back
+        const int xs[] = {cx + 5, cx + 5, cx - 5};
+        const int ys[] = {cy - 5, cy + 6, cy};
         renderer_.fillPolygon(xs, ys, 3, false);
         break;
       }
-      default: {
-        const int xs[] = {cx - kIcon, cx + kIcon, cx};
-        const int ys[] = {cy - kIcon / 2, cy - kIcon / 2, cy + kIcon};
+      case 1:  // ● select
+        renderer_.fillRoundedRect(cx - 6, cy - 5, 12, 12, 6, Color::White);
+        break;
+      case 2: {  // ▲ up
+        const int xs[] = {cx - 5, cx + 5, cx};
+        const int ys[] = {cy + 6, cy + 6, cy - 4};
+        renderer_.fillPolygon(xs, ys, 3, false);
+        break;
+      }
+      default: {  // ▼ down
+        const int xs[] = {cx - 5, cx + 5, cx};
+        const int ys[] = {cy - 5, cy - 5, cy + 5};
         renderer_.fillPolygon(xs, ys, 3, false);
         break;
       }
     }
-
-    const auto text = renderer_.truncatedText(fonts::UI_10, labels[i], tabW - 6);
-    const int textW = renderer_.getTextWidth(fonts::UI_10, text.c_str());
-    renderer_.drawText(fonts::UI_10, cx - textW / 2, slot.y + 44, text.c_str(), false);
   }
 }
 
 void Shell::present(const bool clean) {
-  if (clean || ++fastSinceClean_ >= kMaxFastRefreshes) {
+  // Force a half refresh every N fast ones to clear ghosting; 0 means never.
+  const int every = settings::value(settings::kRefresh);
+  if (clean || (every > 0 && ++fastSinceClean_ >= every)) {
     fastSinceClean_ = 0;
     renderer_.displayBuffer(HalDisplay::HALF_REFRESH);
   } else {

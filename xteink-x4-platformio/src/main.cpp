@@ -9,9 +9,11 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Rtc.h>
 #include <XteinkDetect.h>
 
 #include "Fonts.h"
+#include "Settings.h"
 #include "apps/ImageApp.h"
 #include "apps/SettingsApp.h"
 #include "shell/Input.h"
@@ -21,12 +23,12 @@
 namespace {
 
 constexpr unsigned long kPowerHoldToSleepMs = 1000;
-constexpr unsigned long kAutoSleepMs = 10 * 60 * 1000;
 
 GfxRenderer renderer(display);
 FontDecompressor fontDecompressor;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts(), renderer.getTtfFonts());
-Shell shell(renderer);
+Rtc rtc;
+Shell shell(renderer, rtc);
 
 ImageApp imageApp;
 SettingsApp settingsApp;
@@ -38,7 +40,7 @@ bool powerReleasedSinceWake = false;
 void enterDeepSleep() {
   LOG_INF("MAIN", "Entering deep sleep");
   renderer.clearScreen();
-  renderer.drawCenteredText(fonts::TITLE_18, layout::kScreenH / 2 - 20, "Sleeping", true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(fonts::MEDIUM_22, layout::kScreenH / 2 - 20, "Sleeping");
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   display.deepSleep();
   Storage.prepareForDeepSleep();
@@ -86,6 +88,7 @@ void setup() {
   fontCacheManager.setFontDecompressor(&fontDecompressor);
   renderer.setFontCacheManager(&fontCacheManager);
   fonts::registerAll(renderer);
+  settings::begin();
 
   shell.addApp(&imageApp);
   shell.addApp(&settingsApp);
@@ -125,6 +128,24 @@ void handleSerialCommands() {
         shell.dispatch(k.action);
         lastActivityMs = millis();
       }
+    }
+  } else if (line.startsWith("TIME ")) {
+    // Set the RTC: TIME YYYY-MM-DD HH:MM:SS W (W = weekday, 0 = Sunday)
+    unsigned year, month, day, hour, minute, second, weekday;
+    if (sscanf(line.c_str() + 5, "%u-%u-%u %u:%u:%u %u", &year, &month, &day, &hour, &minute, &second, &weekday) ==
+        7) {
+      Rtc::DateTime dt;
+      dt.year = year;
+      dt.month = month;
+      dt.day = day;
+      dt.hour = hour;
+      dt.minute = minute;
+      dt.second = second;
+      dt.weekday = weekday % 7;
+      logSerial.printf("TIME %s\n", rtc.set(dt) ? "ok" : "failed");
+      shell.invalidate();
+    } else {
+      logSerial.printf("TIME usage: TIME YYYY-MM-DD HH:MM:SS W\n");
     }
   } else if (line == "STATUS") {
     // Input diagnostics: is the sampling task alive, what do the pins read,
@@ -171,8 +192,10 @@ void loop() {
       gpio.getPowerButtonHeldTime() > kPowerHoldToSleepMs) {
     enterDeepSleep();
   }
-  if (millis() - lastActivityMs > kAutoSleepMs) enterDeepSleep();
+  const unsigned long sleepAfterMs = settings::value(settings::kSleep) * 60UL * 1000UL;  // 0 = never
+  if (sleepAfterMs > 0 && millis() - lastActivityMs > sleepAfterMs) enterDeepSleep();
 
+  shell.tick();
   shell.flush();
 
   // Input no longer depends on this loop's cadence, so idling slower is safe.

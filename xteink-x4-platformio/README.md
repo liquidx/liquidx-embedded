@@ -3,19 +3,25 @@
 A small landscape "OS shell" firmware for the Xteink X4 Classic (and original X4) e-paper device, built
 on the [FreeInk SDK](https://github.com/Free-Ink/freeink-sdk) (the hardware
 layer behind [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)).
-No ebook support: full-screen apps, with a key-hint gutter beside the front keys.
+No ebook support: each page is a card, with a button gutter beside the front keys.
+The visual spec is [docs/design/](docs/design/README.md).
 
 ```
- chrome shown                                  chrome hidden (top-edge key)
-┌──────────────────────────────────┬──────┐   ┌─────────────────────────────────────────┐
-│ Home                             │ 87%  │   │                                         │
-│ ▓ Images                       ▓ │⌂ Home│   │                                         │
-│   Settings                       │● Open│   │          content, 800 × 480             │
-│                                  │▲ Up  │   │                                         │
-│                                  │▼ Down│   │                                         │
-└──────────────────────────────────┴──────┘   └─────────────────────────────────────────┘
-          content 728 × 480          gutter 72
+ home (depth 0)                     Settings › Refresh (depth 2)
+┌──────────────────────────────╮ ┌───┐   ┌────────────────────────────╮││ ┌───┐
+│ (Wed 23 Sep)                 │ │ ▭ │   │ (SETTINGS / REFRESH)       │││ │ ▭ │
+│                              │ │ ◀ │   │                            │││ │ ◀ │
+│  14:32                       │ │ ● │   │ Full refresh every    6    │││ │ ● │
+│                              │ │ ▲ │   │ 12 pages           [ 12 ]  │││ │ ▲ │
+│ [▣ Images               24 ] │ │ ▼ │   │ Clears ghosting…     24    │││ │ ▼ │
+│  ⚙ Settings                  │ │   │   │                    Never   │││ │   │
+└──────────────────────────────╯ └───┘   └────────────────────────────╯││ └───┘
+       card 728 × 480           gutter 72     each level down is 12px narrower
 ```
+
+Pages below the current one stay drawn underneath, so the back stack shows as
+one card edge per level. The top-edge side key hides the cards, gutter and
+captions to give the page the whole 800 × 480 screen.
 
 ## Hardware
 
@@ -27,22 +33,25 @@ No ebook support: full-screen apps, with a key-hint gutter beside the front keys
 - Hold it in landscape with the four front keys on the **right** edge. On the
   X4C the two side keys are then on the top and bottom edges, near the left.
 
-The front keys drive the whole UI. The gutter labels what each one does right
-now; a faint stub means the key does nothing on this screen.
+The front keys drive the whole UI. The gutter has a round button beside each
+one: ◀ ● ▲ ▼.
 
 | Key (landscape) | Action |
 | --- | --- |
-| Front 1, top (portrait "Right") | **Home** at an app's top level, **Back** once drilled in (nothing on Home) |
-| Front 2 (portrait "Left") | **Select** / Open / View |
-| Front 3 (portrait "Confirm") | **Up** (previous image in the viewer) |
-| Front 4, bottom (portrait "Back") | **Down** (next image in the viewer) |
+| Front 1, top (portrait "Right") | **Back** one page; from an app's top level, home (nothing on home) |
+| Front 2 (portrait "Left") | **Select** / Open |
+| Front 3 (portrait "Confirm") | **Up** (previous image) |
+| Front 4, bottom (portrait "Back") | **Down** (next image) |
 | Side key, top edge (next to Power) | Show / hide chrome: gutter, titles, captions |
 | Side key, bottom edge | unassigned |
 | Power (hold 1s) | Sleep |
 
-Navigation: **Home** is a full-screen list of apps. **Images** lists `/images`,
-Select views one full screen, and Up/Down step through them. **Settings** lists
-Wi-Fi and About; those pages scroll with Up/Down.
+Navigation: **Home** shows the date, a large clock (from the X4C's BM8563 RTC)
+and a row per app; Up/Down move between rows and Select opens one. **Images**
+opens straight onto the first BMP in `/images`, filling the card, and Up/Down
+step through them. **Settings** lists Refresh, Sleep after, Clock, Storage and
+About with their current values. Select opens a setting's page, where Up/Down
+change the value (saved to flash straight away) and Select or Back returns.
 
 The mapping lives only in [`src/shell/Input.cpp`](src/shell/Input.cpp). If the
 screen comes up upside down, change `kOrientation` in
@@ -104,7 +113,10 @@ Driving the device from the Mac (device awake, on USB):
 python3 scripts/devctl.py shot shot.png          # screenshot of the panel
 python3 scripts/devctl.py key select down back   # inject key actions (back/select/up/down/chrome)
 python3 scripts/devctl.py status                 # input task + raw button pin states
+python3 scripts/devctl.py time                   # set the RTC to the Mac's local time
 ```
+
+The clock shows `--:--` until the RTC has been set once.
 
 ## Images
 
@@ -123,15 +135,18 @@ src/
   main.cpp            boot, wake handling, sleep, main loop
   Fonts.*             font IDs and registration
   shell/
-    Layout.h          screen geometry and orientation
+    Layout.h          screen geometry, card stack, orientation
     Input.*           physical keys → semantic Actions (the only place keys are named)
-    App.h             app interface: render(area, focused) + handle(action)
-    Shell.*           home list, key-hint gutter, chrome toggle, refresh policy
+    App.h             app interface: render(area) + handle(action) + depth()
+    Shell.*           home, card stack, gutter, chrome toggle, refresh policy
   ui/
-    Widgets.*         ListView (scrolling list), InfoView (scrolling label/value rows)
+    Widgets.*         pills, rows, ListView, InfoView, icons
   apps/
-    ImageApp.*        /images list + full-screen BMP viewer
-    SettingsApp.*     Wi-Fi (placeholder), About
+    ImageApp.*        /images viewer, one BMP per page
+    SettingsApp.*     settings list, choice pages, About
+  Settings.*          persisted settings (NVS) and their options
+fonts/                IBM Plex Mono TTFs (OFL); scripts/fonts.sh turns them into headers
+docs/design/          visual spec and mockups
 lib/                  code vendored from CrossPoint, see lib/README.md
 freeink-sdk/          hardware SDK (git submodule)
 ```
@@ -141,11 +156,12 @@ To add an app, subclass `App`, then `shell.addApp(&myApp)` in `main.cpp`.
 ## Status / next
 
 - [x] Landscape shell, key mapping
-- [x] Key-hint gutter beside the front keys
+- [x] Button gutter beside the front keys, card back stack
 - [x] Home / Select / Up / Down navigation, chrome toggle, scrolling pages
 - [x] Serial screenshot tool
 - [x] BMP image viewer
-- [x] Settings → About
+- [x] Settings: refresh interval, sleep timer, 12/24h clock, storage, About
 - [ ] Wi-Fi: scan, join, save credentials (start with `/wifi.txt` on SD)
-- [ ] Persist last app / settings
+- [x] Persist settings
+- [ ] Persist last app
 - [ ] On-device keyboard, or a hotspot + web form for entering Wi-Fi details
