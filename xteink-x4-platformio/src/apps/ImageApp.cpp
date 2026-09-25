@@ -36,21 +36,15 @@ void drawMessage(GfxRenderer& r, const layout::Rect& area, const bool chrome, co
   }
 }
 
-// Draw the bitmap scaled and centre-cropped to cover `area`. drawBitmap only
-// scales down, so small images are centred instead.
-bool drawCover(GfxRenderer& r, Bitmap& bitmap, const layout::Rect& area) {
-  const float bw = bitmap.getWidth(), bh = bitmap.getHeight();
-  const float areaAspect = static_cast<float>(area.w) / area.h;
-  float cropX = 0, cropY = 0;
-  if (bw / bh > areaAspect) {
-    cropX = 1.0f - areaAspect * bh / bw;
-  } else {
-    cropY = 1.0f - bw / (areaAspect * bh);
-  }
-  const float cw = bw * (1 - cropX), ch = bh * (1 - cropY);
-  const float scale = std::min(1.0f, area.w / cw);
-  const int w = static_cast<int>(cw * scale), h = static_cast<int>(ch * scale);
-  return r.drawBitmap(bitmap, area.x + (area.w - w) / 2, area.y + (area.h - h) / 2, area.w, area.h, cropX, cropY);
+// Where an image of `size` starts along an axis of `avail` pixels: centred
+// when it fits, otherwise pinned to the start and cropped by the clip rect.
+int imageOrigin(const int size, const int avail) { return size > avail ? 0 : (avail - size) / 2; }
+
+// Draw the bitmap at its native resolution; never scaled.
+bool drawNative(GfxRenderer& r, const Bitmap& bitmap, const layout::Rect& area) {
+  const int x = area.x + imageOrigin(bitmap.getWidth(), area.w);
+  const int y = area.y + imageOrigin(bitmap.getHeight(), area.h);
+  return r.drawBitmap(bitmap, x, y, 0, 0);  // no max size: no scaling
 }
 
 }  // namespace
@@ -104,7 +98,7 @@ void ImageApp::render(GfxRenderer& r, const layout::Rect& area, const bool chrom
     Bitmap bitmap(file, true);
     const auto err = bitmap.parseHeaders();
     if (err == BmpReaderError::Ok) {
-      drawn = drawCover(r, bitmap, area);
+      drawn = drawNative(r, bitmap, area);
     } else {
       LOG_ERR("IMG", "%s: %s", path.c_str(), Bitmap::errorToString(err));
     }

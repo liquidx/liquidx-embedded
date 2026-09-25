@@ -44,7 +44,11 @@ one: ◀ ● ▲ ▼.
 | Front 4, bottom (portrait "Back") | **Down** (next image) |
 | Side key, top edge (next to Power) | Show / hide chrome: gutter, titles, captions |
 | Side key, bottom edge | unassigned |
-| Power (hold 1s) | Sleep |
+| Power (hold 1s) | Sleep (blanks to "Sleeping") |
+
+After the Settings → Sleep after timeout the device also sleeps, but leaves the
+current page on screen with the chrome hidden and a ❚❚ badge in the bottom-right
+corner. Power wakes it, back to home.
 
 Navigation: **Home** shows the date, a large clock (from the X4C's BM8563 RTC)
 and a row per app; Up/Down move between rows and Select opens one. **Images**
@@ -121,11 +125,15 @@ The clock shows `--:--` until the RTC has been set once.
 ## Images
 
 Put `.bmp` files in `/images` on the SD card. Any uncompressed BMP (1–32 bpp)
-works: the device scales it down to fit and dithers it. Pre-sizing makes
-drawing faster. On macOS:
+works. The device never scales: it draws at native resolution, pinned to the
+top-left and cropped when larger than the card (716 × 480 with chrome, 800 × 480
+without), centred when smaller. `scripts/img2bmp.py` (needs Pillow) turns PNGs and JPGs into
+800×480 1-bit BMPs that the device draws as-is:
 
 ```sh
-sips -Z 620 -s format bmp photo.jpg --out photo.bmp
+python3 scripts/img2bmp.py photo.jpg art.png -o out/       # fill and crop, dithered
+python3 scripts/img2bmp.py sketch.png --dither none        # hard threshold for line art
+python3 scripts/img2bmp.py photo.jpg --fit contain --preview   # letterbox, write a PNG preview
 ```
 
 ## Layout

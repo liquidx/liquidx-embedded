@@ -1453,8 +1453,8 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       screenY = std::floor(screenY * scale);
     }
     screenY += y;  // the offset should not be scaled
-    if (screenY >= getScreenHeight()) {
-      break;
+    if (screenY >= getScreenHeight() && bitmap.isTopDown()) {
+      break;  // every later row is further down
     }
 
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
@@ -1463,7 +1463,9 @@ bool GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       return false;
     }
 
-    if (screenY < 0) {
+    // Bottom-up files deliver their off-screen rows first; read and skip them
+    // to keep the row counter in sync (as drawBitmap1Bit does).
+    if (screenY < 0 || screenY >= getScreenHeight()) {
       continue;
     }
 

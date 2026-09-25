@@ -31,12 +31,18 @@ class Shell {
   // Mark the screen dirty. `clean` asks for a half refresh.
   void invalidate(bool clean = false);
 
+  // Before auto-sleep: repaint the current page with chrome hidden and a
+  // paused badge in the bottom-right corner, to stay on the panel while asleep.
+  void showPaused();
+
  private:
   int depth() const;
   int clockMinute() const;
   void drawHome(const layout::Rect& area);
   void drawCardStack(int depth) const;
   void drawGutter() const;
+  void drawPausedBadge() const;
+  void drawScreen();
   void redraw(bool clean);
   void present(bool clean);
 

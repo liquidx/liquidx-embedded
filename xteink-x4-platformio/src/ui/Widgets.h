@@ -31,7 +31,8 @@ int drawPill(GfxRenderer& r, int font, int x, int y, const char* text, bool blac
 int drawTitle(GfxRenderer& r, const layout::Rect& area, const char* title);
 
 // One selectable row: optional icon, label, and a value right-aligned. The
-// selected row is a black pill with white text.
+// selected row is a black pill with white text. Anything selectable uses the
+// medium font; the small one is too thin to read on e-ink except as decoration.
 struct RowStyle {
   int height;
   int pitch;  // row-to-row distance
@@ -39,7 +40,7 @@ struct RowStyle {
   int font;
 };
 constexpr RowStyle kHomeRow{60, 68, 16, fonts::MEDIUM_22};
-constexpr RowStyle kListRow{50, 56, 14, fonts::SMALL_15};
+constexpr RowStyle kListRow{56, 62, 14, fonts::MEDIUM_22};
 void drawRow(GfxRenderer& r, const layout::Rect& row, const RowStyle& style, Icon icon, const char* label,
              const char* value, bool selected);
 

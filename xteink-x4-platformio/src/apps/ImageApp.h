@@ -5,8 +5,9 @@
 
 #include "../shell/App.h"
 
-// Shows the BMP files in /images on the SD card, one per page, filling the
-// card. Up/Down step through them.
+// Shows the BMP files in /images on the SD card, one per page, at native
+// resolution: larger images are cropped from the top-left, smaller ones
+// centred. Up/Down step through them.
 class ImageApp : public App {
  public:
   const char* name() const override { return "Images"; }

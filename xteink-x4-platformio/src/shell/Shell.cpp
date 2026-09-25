@@ -107,7 +107,19 @@ int Shell::depth() const {
   return std::min(layout::kMaxDepth, 1 + current_->depth());
 }
 
+void Shell::showPaused() {
+  chrome_ = false;
+  drawScreen();
+  drawPausedBadge();
+  renderer_.displayBuffer(HalDisplay::HALF_REFRESH);
+}
+
 void Shell::redraw(const bool clean) {
+  drawScreen();
+  present(clean);
+}
+
+void Shell::drawScreen() {
   renderer_.clearScreen();
   const auto area = chrome_ ? layout::cardArea(depth()) : layout::kFullScreen;
   renderer_.setClipRect(area.x, area.y, area.w, area.h);
@@ -121,7 +133,6 @@ void Shell::redraw(const bool clean) {
     drawCardStack(depth());
     drawGutter();
   }
-  present(clean);
 }
 
 void Shell::drawHome(const layout::Rect& area) {
@@ -214,6 +225,18 @@ void Shell::drawGutter() const {
       }
     }
   }
+}
+
+void Shell::drawPausedBadge() const {
+  // A key button's size, in the gutter's column, inset from the bottom edge by
+  // the same margin the buttons keep from the right edge.
+  constexpr int R = layout::kKeyRadius;
+  constexpr int cx = layout::kKeyCenterX;
+  constexpr int cy = layout::kScreenH - (layout::kScreenW - layout::kKeyCenterX);
+  renderer_.fillRoundedRect(cx - R, cy - R, R * 2, R * 2, R, Color::Black);
+  // ❚❚
+  renderer_.fillRect(cx - 6, cy - 6, 4, 13, false);
+  renderer_.fillRect(cx + 2, cy - 6, 4, 13, false);
 }
 
 void Shell::present(const bool clean) {

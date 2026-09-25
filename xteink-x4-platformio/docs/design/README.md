@@ -12,9 +12,9 @@ Device: 800×480 landscape, 1-bit e-ink. PNGs are 1:1 device pixels.
 ## Type — three sizes only
 IBM Plex Mono throughout.
 - Display 136px, weight 400, letter-spacing −0.05em — clock, setting value.
-- Medium 22px, weight 500 — home list labels, setting titles, unit suffix ("pages").
-- Small 15px, weight 400 — everything else: date pill, section pills (uppercase, tracking .08em), list rows, filenames, counters, descriptions.
-Rows: home items 60px / radius 16; list rows 50px / radius 14.
+- Medium 22px, weight 500 — anything with a highlight/selected state (home items, settings rows, option rows), setting titles, unit suffix ("pages").
+- Small 15px, weight 400 — non-selectable text only: date pill, section pills (uppercase, tracking .08em), filenames, counters, descriptions.
+Rows: home items 60px / radius 16; list rows 56px / radius 14; selected row = black fill, white text.
 
 ## Screens
 1. home — date pill, clock, vertical list: Images (selected), Settings.

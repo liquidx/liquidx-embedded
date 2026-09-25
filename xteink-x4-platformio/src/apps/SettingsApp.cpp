@@ -40,7 +40,7 @@ constexpr int kUnitGap = 12;
 constexpr int kDescBaseline = 410;
 constexpr int kDescPitch = 19;
 constexpr int kDescWidth = 290;
-constexpr int kOptionsW = 200;
+constexpr int kOptionsW = 220;
 constexpr int kOptionsRight = 33;   // from the card edge
 constexpr int kOptionsBottom = 28;  // from the card bottom
 

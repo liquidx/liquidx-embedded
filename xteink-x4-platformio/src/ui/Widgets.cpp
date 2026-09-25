@@ -14,7 +14,7 @@ constexpr int kRightMargin = 33;      // rows stop this far from the card edge
 constexpr int kPillPadX = 10;
 constexpr int kRowIconInset = 22;
 constexpr int kRowIconLabelInset = 57;
-constexpr int kRowTextInset = 19;
+constexpr int kRowTextInset = 20;
 constexpr int kInfoValueOffset = 170;  // value column, from the label column
 constexpr int kInfoPitch = 34;
 

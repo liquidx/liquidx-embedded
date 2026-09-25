@@ -37,11 +37,17 @@ unsigned long lastActivityMs = 0;
 // The hold that woke the device must be released before a new hold can sleep it.
 bool powerReleasedSinceWake = false;
 
-void enterDeepSleep() {
+// `paused`: an idle timeout. Leave the current page on the panel, chrome
+// hidden, with a paused badge. Otherwise (Power held) blank to "Sleeping".
+void enterDeepSleep(const bool paused) {
   LOG_INF("MAIN", "Entering deep sleep");
-  renderer.clearScreen();
-  renderer.drawCenteredText(fonts::MEDIUM_22, layout::kScreenH / 2 - 20, "Sleeping");
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  if (paused) {
+    shell.showPaused();
+  } else {
+    renderer.clearScreen();
+    renderer.drawCenteredText(fonts::MEDIUM_22, layout::kScreenH / 2 - 20, "Sleeping");
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  }
   display.deepSleep();
   Storage.prepareForDeepSleep();
   powerManager.startDeepSleep(gpio);
@@ -190,10 +196,10 @@ void loop() {
   if (!gpio.isPressed(HalGPIO::BTN_POWER)) powerReleasedSinceWake = true;
   if (powerReleasedSinceWake && gpio.isPressed(HalGPIO::BTN_POWER) &&
       gpio.getPowerButtonHeldTime() > kPowerHoldToSleepMs) {
-    enterDeepSleep();
+    enterDeepSleep(false);
   }
   const unsigned long sleepAfterMs = settings::value(settings::kSleep) * 60UL * 1000UL;  // 0 = never
-  if (sleepAfterMs > 0 && millis() - lastActivityMs > sleepAfterMs) enterDeepSleep();
+  if (sleepAfterMs > 0 && millis() - lastActivityMs > sleepAfterMs) enterDeepSleep(true);
 
   shell.tick();
   shell.flush();

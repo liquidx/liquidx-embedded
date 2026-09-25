@@ -7,7 +7,7 @@ the `freeink-sdk` submodule, not from here.
 
 | Library | Why it's here | Local changes |
 | --- | --- | --- |
-| `GfxRenderer` | Drawing, text, BMP decode, landscape orientation | none |
+| `GfxRenderer` | Drawing, text, BMP decode, landscape orientation | `drawBitmap` reads and skips off-screen rows of bottom-up BMPs instead of stopping at the first one, so unscaled images taller than the screen draw |
 | `EpdFont` | Bitmap font rendering | Replaced the built-in fonts with IBM Plex Mono made by `scripts/fontconvert.py`; dropped font sources and CrossPoint's generator scripts |
 | `hal` | Thin layer over the SDK used by `GfxRenderer` | Dropped `HalClock`, `HalFrontlight`, `HalSystem` (panic capture), `HalTiltSensor`; `HalGPIO.h` gained `beginAsyncInput()`/`popPress()` pass-throughs to the SDK's background button sampling |
 | `Logging`, `Utf8`, `Memory` | Required by the above | none |
