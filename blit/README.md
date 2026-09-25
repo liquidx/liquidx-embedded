@@ -13,7 +13,7 @@ display just copies bytes to its panel.
   of one, and drive the page with the display's buttons.
 
 Displays: the [Xteink X4 firmware](../xteink-x4-platformio/) (Bluetooth app)
-speaks v1. The library speaks v1 and v2. The simulated display speaks both,
+speaks v2. The library speaks v1 and v2. The simulated display speaks both,
 so everything here can be tried without hardware.
 
 blit was called "ble-cast" until it grew button events and caps
@@ -24,10 +24,14 @@ work.
 
 ```sh
 cd blit
-python3 -m http.server 8000
+npx vite
 ```
 
-Open <http://localhost:8000/web/> in **Chrome or Edge** (desktop or Android).
+[Vite](https://vite.dev/) serves `blit/` on <http://localhost:8000/> (see
+`vite.config.mjs`), opens <http://localhost:8000/web/>, and reloads the page
+when you edit anything under `web/` or `js/`. The first run asks npx to
+download Vite; nothing is installed in the repo. Use **Chrome or Edge**
+(desktop or Android).
 Web Bluetooth needs a secure context, which `localhost` counts as; anywhere
 else, serve it over HTTPS. Safari and Firefox have no Web Bluetooth. On macOS,
 Chrome also needs Bluetooth permission in System Settings → Privacy &
