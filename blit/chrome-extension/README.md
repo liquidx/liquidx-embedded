@@ -7,14 +7,29 @@ display's buttons. It uses the library in [`../js`](../js/).
 
 ## Install
 
+The extension's sources import the protocol library from [`../js`](../js/),
+which the web demo shares, so Chrome loads a built copy rather than this
+folder. You need Node.js 20 or later.
+
 ```sh
 cd blit/chrome-extension
-./sync-lib.sh        # copies ../js into lib/ (Chrome can't load files outside the folder)
+npm install          # esbuild, for the bundled build
+npm run dev          # -> build/dev: unbundled, for development
 ```
 
 Then go to `chrome://extensions`, turn on **Developer mode**, click **Load
-unpacked** and pick `blit/chrome-extension`. Run `./sync-lib.sh` again and
-click the extension's reload button after changing `../js`.
+unpacked** and pick `blit/chrome-extension/build/dev`.
+
+| Command | Output | Use |
+| --- | --- | --- |
+| `npm run dev` | `build/dev/` | Unbundled ES modules: the sources as they are, with the library copied into `lib/`, one file each, so DevTools shows them as written. Doesn't need `npm install`. |
+| `npm run watch` | `build/dev/` | The same, rebuilt when anything here or in `../js` changes. Then click the extension's reload button in `chrome://extensions`. |
+| `npm run build` | `build/dist/` and `build/blit-<version>.zip` | For distribution: esbuild bundles `popup.js` and `session.js` (library included) into one minified file each, and minifies the content script and worker. The zip is what the Chrome Web Store takes; load `build/dist` unpacked to test exactly what ships. |
+| `npm test` | | The library's tests (`../js/test`) |
+
+Both builds check that every file the manifest, the HTML pages and the
+scripts refer to is in the output, and fail if one isn't. The version comes
+from `manifest.json`.
 
 Needs Chrome (or Edge) 116 or later. Web Bluetooth works on desktop Chrome on
 macOS, Windows, ChromeOS and Linux (on Linux you may need
@@ -117,13 +132,14 @@ option (host permission for all sites, which Chrome asks you to confirm).
 ## How it's built
 
 ```
+build.mjs        the build: dev (copy), --watch, --dist (bundle + zip)
 manifest.json    MV3; activeTab, tabCapture, scripting, storage; optional <all_urls>
 popup.*          settings for this tab; start / stop. Writes chrome.storage.session.
 session.*        one window per blitted tab: the Bluetooth link, capture, render, send loop
 content.js       injected on demand: region picker, element rects, scroll / key / click replay
 config.js        shared settings and storage keys
 ticker.js        1 s heartbeat in a worker (not throttled in background windows)
-lib/             copy of ../js, made by sync-lib.sh (git-ignored)
+build/           build output (git-ignored); lib/ inside build/dev is ../js
 ```
 
 Why a session window rather than the popup or a service worker? The popup

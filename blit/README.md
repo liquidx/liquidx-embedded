@@ -72,7 +72,9 @@ fonts and images as data URLs, and draws it into a canvas through an SVG
   crispest with `dither: 'threshold'`.
 
 The [Chrome extension](chrome-extension/) does the same for pages you don't
-control, by capturing the tab instead.
+control, by capturing the tab instead. It has a build step (`npm run dev` for an
+unbundled copy to load while developing, `npm run build` for a bundled zip to
+distribute), described in its README.
 
 ## The library
 
@@ -167,5 +169,5 @@ js/dom-capture.js       captureElement: DOM element -> canvas, in place
 js/sim-display.js       SimDisplay (a v1/v2 display in JS) and SimTransport
 js/test/                node --test
 web/                    demo page, and examples/clock/
-chrome-extension/       blit a browser tab
+chrome-extension/       blit a browser tab (npm run dev / build)
 ```
