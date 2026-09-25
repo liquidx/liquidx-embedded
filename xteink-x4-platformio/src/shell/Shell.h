@@ -25,8 +25,13 @@ class Shell {
   // Repaint if anything changed since the last flush. Returns true if it drew.
   bool flush();
 
-  // Call from the main loop: marks home dirty when the clock's minute changes.
+  // Call from the main loop: marks home dirty when the clock's minute changes,
+  // and lets the open app do deferred work once its page is on screen.
   void tick();
+
+  // True while the open app has background work; the main loop then runs
+  // flat out instead of idling.
+  bool busy() const { return current_ != nullptr && current_->busy(); }
 
   // Mark the screen dirty. `clean` asks for a half refresh.
   void invalidate(bool clean = false);

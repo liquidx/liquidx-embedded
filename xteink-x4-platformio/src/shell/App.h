@@ -40,4 +40,10 @@ class App {
   // How many pages the user has drilled in below the app's top level. Each one
   // adds a card to the visible back stack.
   virtual int depth() const { return 0; }
+
+  // Called from the main loop while the app is open and its page is on
+  // screen. For slow work that shouldn't hold up showing the page: do a
+  // bounded slice per call, and report busy() until it's finished.
+  virtual Result tick() { return Result::Ignored; }
+  virtual bool busy() const { return false; }
 };

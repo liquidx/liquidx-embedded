@@ -61,7 +61,12 @@ int Shell::clockMinute() const {
 }
 
 void Shell::tick() {
-  if (current_ != nullptr) return;
+  if (current_ != nullptr) {
+    if (dirty_) return;  // let the page draw first
+    const Result result = current_->tick();
+    if (result != Result::Ignored) invalidate(result == Result::CleanRedraw);
+    return;
+  }
   const unsigned long now = millis();
   if (now - lastClockPollMs_ < kClockPollMs) return;
   lastClockPollMs_ = now;

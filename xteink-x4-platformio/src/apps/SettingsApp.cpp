@@ -68,14 +68,20 @@ void SettingsApp::onOpen() {
   snprintf(version_, sizeof(version_), "v%s", FW_VERSION);
   if (char* plus = strchr(version_, '+')) *plus = '\0';
 
-  // Counting free clusters walks the FAT, so do it once per open.
-  if (Storage.ready()) {
+}
+
+Result SettingsApp::tick() {
+  // Measure once per boot: nothing on the device writes to the card, and USB
+  // drive mode reboots. One chunk per tick keeps keys responsive meanwhile.
+  if (storageScan_.done() || !storageScan_.step()) return Result::Ignored;
+  if (storageScan_.ok()) {
     constexpr double kGB = 1024.0 * 1024.0 * 1024.0;
-    auto& sd = SDCardManager::getInstance();
-    snprintf(storage_, sizeof(storage_), "%.1f / %.0f GB", sd.sdUsedBytes() / kGB, sd.sdTotalBytes() / kGB);
+    snprintf(storage_, sizeof(storage_), "%.1f / %.0f GB", storageScan_.usedBytes() / kGB,
+             SDCardManager::getInstance().sdTotalBytes() / kGB);
   } else {
     snprintf(storage_, sizeof(storage_), "No card");
   }
+  return page_ == Page::List ? Result::Redraw : Result::Ignored;
 }
 
 void SettingsApp::render(GfxRenderer& r, const layout::Rect& area, const bool chrome) {

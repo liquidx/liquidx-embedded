@@ -204,8 +204,11 @@ void loop() {
   shell.tick();
   shell.flush();
 
-  // Input no longer depends on this loop's cadence, so idling slower is safe.
-  if (millis() - lastActivityMs > HalPowerManager::IDLE_POWER_SAVING_MS) {
+  // Input no longer depends on this loop's cadence, so idling slower is safe,
+  // unless the shell has background work to get through.
+  if (shell.busy()) {
+    powerManager.setPowerSaving(false);
+  } else if (millis() - lastActivityMs > HalPowerManager::IDLE_POWER_SAVING_MS) {
     powerManager.setPowerSaving(true);
     delay(50);
   } else {
