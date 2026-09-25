@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ble-cast clock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous">
+<style>
+  :root { --ink: #111; --paper: #fff; --muted: #6b6b6b; --line: #d9d9d6; --soft: #f3f3f1; --ok: #1f7a3a; --err: #b3261e; color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 "IBM Plex Mono", ui-monospace, monospace; color: var(--ink); background: var(--soft); }
+  main { display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; align-items: flex-start; }
+  h1 { font-size: 18px; font-weight: 500; margin: 0; }
+  h2 { font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 12px; color: var(--muted); }
+  a { color: var(--muted); }
+  .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 20px; min-width: 0; }
+  .controls { width: 360px; display: grid; gap: 14px; }
+  .controls > * { min-width: 0; } /* let the preview shrink to the column */
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 500; cursor: pointer; padding: 8px 16px; border-radius: 999px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); }
+  button.secondary { background: var(--paper); color: var(--ink); }
+  button:disabled { opacity: .35; cursor: default; }
+  label { color: var(--muted); font-size: 12px; }
+  input[type=number], select { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; width: 90px; }
+  #status { font-size: 12px; color: var(--muted); min-height: 1.4em; }
+  #status.err { color: var(--err); }
+  #status.ok { color: var(--ok); }
+  .frame { overflow: auto; }
+  #preview { display: block; image-rendering: pixelated; box-shadow: 0 0 0 1px var(--line); max-width: 100%; }
+
+  /* ---- The element that gets cast: plain HTML/CSS, sized to the device. ---- */
+  #screen {
+    width: 716px; height: 480px; /* updated to the device's frame area on connect */
+    background: #fff; color: #000;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    padding: 32px 40px; display: grid; grid-template-rows: auto 1fr auto; overflow: hidden;
+  }
+  #screen .date { justify-self: start; background: #000; color: #fff; border-radius: 999px; padding: 3px 12px; font-size: 15px; }
+  #screen .time { align-self: center; font-size: 136px; letter-spacing: -0.05em; line-height: 1; }
+  #screen .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; border-top: 2px solid #000; padding-top: 14px; }
+  #screen .label { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+  #screen .value { font-size: 22px; font-weight: 500; }
+  /* A progress bar drawn with a pseudo-element: captured too. */
+  #screen .bar { position: relative; height: 10px; border: 2px solid #000; border-radius: 999px; margin-top: 6px; }
+  #screen .bar::before { content: ""; position: absolute; inset: 0; width: var(--pct); background: #000; border-radius: 999px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="panel controls">
+    <div class="row" style="justify-content: space-between">
+      <h1>ble-cast clock</h1>
+      <a href="../../">← back</a>
+    </div>
+    <p style="margin:0;color:var(--muted);font-size:12px">The panel on the right is ordinary HTML. It's captured in place with <code>captureElement()</code> (no screen sharing), dithered to 1 bit and sent to the X4's Bluetooth app.</p>
+    <div class="row">
+      <button id="connect">Connect</button>
+      <button id="send" class="secondary" disabled>Send now</button>
+    </div>
+    <div class="row">
+      <label for="every">Every (s)</label>
+      <input id="every" type="number" min="10" step="10" value="60">
+      <button id="auto" class="secondary" disabled>Auto-send</button>
+    </div>
+    <div class="row">
+      <label for="dither">Dither</label>
+      <select id="dither">
+        <option value="threshold">None (crisp text)</option>
+        <option value="atkinson">Atkinson</option>
+        <option value="floyd">Floyd–Steinberg</option>
+      </select>
+      <label><input id="persist" type="checkbox"> Save to SD</label>
+    </div>
+    <div id="status">Not connected</div>
+    <h2>Last frame sent</h2>
+    <div class="frame"><canvas id="preview" width="716" height="480"></canvas></div>
+  </div>
+
+  <div class="panel frame">
+    <h2>Live element</h2>
+    <div id="screen">
+      <div class="date" id="date"></div>
+      <div class="time" id="time"></div>
+      <div class="stats">
+        <div><div class="label">Day</div><div class="value" id="dayPct"></div><div class="bar" id="dayBar"></div></div>
+        <div><div class="label">Week</div><div class="value" id="week"></div></div>
+        <div><div class="label">Frames</div><div class="value" id="frames">0</div></div>
+      </div>
+    </div>
+  </div>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

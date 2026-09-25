@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ble-cast</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #111;
+    --paper: #fff;
+    --muted: #6b6b6b;
+    --line: #d9d9d6;
+    --soft: #f3f3f1;
+    --accent: #111;
+    --ok: #1f7a3a;
+    --err: #b3261e;
+    --radius: 14px;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.45 "IBM Plex Mono", ui-monospace, monospace;
+    color: var(--ink);
+    background: var(--soft);
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px 24px; background: var(--paper); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 2;
+  }
+  h1 { font-size: 18px; font-weight: 500; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 12px; color: var(--muted); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 4px 12px; border-radius: 999px; background: var(--soft); color: var(--muted);
+  }
+  .chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #bbb; }
+  .chip.on { color: var(--ink); }
+  .chip.on::before { background: var(--ok); }
+  .spacer { flex: 1; }
+  .link { color: var(--muted); text-decoration: none; font-size: 13px; }
+  .link:hover { color: var(--ink); }
+  button {
+    font: inherit; font-weight: 500; cursor: pointer;
+    padding: 8px 16px; border-radius: 999px; border: 1px solid var(--ink);
+    background: var(--ink); color: var(--paper);
+  }
+  button.secondary { background: var(--paper); color: var(--ink); }
+  button:disabled { opacity: .35; cursor: default; }
+  main {
+    display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 24px;
+    padding: 24px; max-width: 1400px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  main > * { min-width: 0; } /* let wide frames scroll inside their box, not widen the page */
+  section { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; min-width: 0; }
+  .stack > * + * { margin-top: 16px; }
+  label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  .row > * { flex: 1 1 120px; }
+  select, input[type=number], input[type=text], input[type=url] {
+    width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink);
+  }
+  .check { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; margin: 0; }
+  .drop {
+    display: grid; place-items: center; text-align: center; min-height: 96px; padding: 16px;
+    border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); cursor: pointer;
+  }
+  .drop.over { border-color: var(--ink); color: var(--ink); }
+  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; }
+  .thumbs figure { margin: 0; position: relative; cursor: pointer; }
+  .thumbs img { width: 100%; aspect-ratio: 5 / 3; object-fit: cover; border-radius: 8px; border: 2px solid transparent; display: block; }
+  .thumbs figure[aria-current=true] img { border-color: var(--ink); }
+  .thumbs figcaption { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thumbs .remove { position: absolute; top: 4px; right: 4px; padding: 0 7px; font-size: 12px; line-height: 20px; }
+  .preview-wrap { background: var(--soft); border-radius: 10px; padding: 12px; overflow: auto; }
+  #preview { display: block; image-rendering: pixelated; background: #fff; box-shadow: 0 0 0 1px var(--line); max-width: 100%; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 12px; }
+  .meta b { color: var(--ink); font-weight: 500; }
+  progress { width: 100%; height: 6px; accent-color: var(--ink); }
+  #log { font-size: 12px; max-height: 220px; overflow: auto; margin: 0; white-space: pre-wrap; color: var(--muted); }
+  #log .err { color: var(--err); }
+  #log .ok { color: var(--ok); }
+  .note { color: var(--muted); font-size: 12px; margin: 0; }
+  .banner { background: #fff4e5; border: 1px solid #f0d7a8; border-radius: 10px; padding: 10px 14px; font-size: 13px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ble-cast</h1>
+  <span id="chip" class="chip">Not connected</span>
+  <span class="spacer"></span>
+  <a class="link" href="examples/clock/">Example: cast a live element →</a>
+  <button id="connect">Connect</button>
+  <button id="disconnect" class="secondary" hidden>Disconnect</button>
+</header>
+
+<main>
+  <div class="stack">
+    <p id="unsupported" class="banner" hidden>This browser has no Web Bluetooth. Use Chrome or Edge on desktop or Android, served from <code>localhost</code> or HTTPS.</p>
+
+    <section class="stack">
+      <h2>Frame</h2>
+      <div class="row">
+        <div>
+          <label for="size">Size</label>
+          <select id="size">
+            <option value="device">Device area</option>
+            <option value="full">Full screen 800×480</option>
+          </select>
+        </div>
+        <div>
+          <label for="fit">Fit</label>
+          <select id="fit">
+            <option value="cover">Cover</option>
+            <option value="contain">Contain</option>
+            <option value="none">Native</option>
+            <option value="stretch">Stretch</option>
+          </select>
+        </div>
+        <div>
+          <label for="dither">Dither</label>
+          <select id="dither">
+            <option value="floyd">Floyd–Steinberg</option>
+            <option value="atkinson">Atkinson</option>
+            <option value="threshold">None</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="contrast">Contrast</label>
+          <input id="contrast" type="number" min="0.5" max="3" step="0.1" value="1">
+        </div>
+        <div>
+          <label for="threshold">Threshold</label>
+          <input id="threshold" type="number" min="1" max="254" step="1" value="128">
+        </div>
+      </div>
+      <label class="check"><input id="persist" type="checkbox"> Save to the SD card</label>
+    </section>
+
+    <section id="tab-images" class="stack">
+      <h2>Images</h2>
+      <label class="drop" id="drop">
+        <input id="files" type="file" accept="image/*" multiple hidden>
+        Drop images here, or click to choose
+      </label>
+      <div id="thumbs" class="thumbs"></div>
+      <div class="row">
+        <div>
+          <label for="interval">Next image every (s)</label>
+          <input id="interval" type="number" min="5" step="5" value="60">
+        </div>
+        <label class="check"><input id="loop" type="checkbox" checked> Loop</label>
+      </div>
+      <div class="row">
+        <button id="sendOne" disabled>Send selected</button>
+        <button id="startShow" class="secondary" disabled>Start slideshow</button>
+        <button id="stopShow" class="secondary" hidden>Stop</button>
+      </div>
+      <p class="note">The interval is sent as the next-frame hint, so with Settings → Frame sleep on the device naps between images (gaps of 30 s or more).</p>
+    </section>
+
+  </div>
+
+  <div class="stack">
+    <section class="stack">
+      <h2>Preview</h2>
+      <div class="meta">
+        <span>Device <b id="mName">–</b></span>
+        <span>Area <b id="mArea">–</b></span>
+        <span>Chunk <b id="mChunk">–</b></span>
+        <span>Frame sleep <b id="mSleep">–</b></span>
+      </div>
+      <div class="preview-wrap"><canvas id="preview" width="716" height="480"></canvas></div>
+      <progress id="progress" value="0" max="1"></progress>
+    </section>
+
+    <section>
+      <h2>Log</h2>
+      <pre id="log"></pre>
+    </section>
+  </div>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

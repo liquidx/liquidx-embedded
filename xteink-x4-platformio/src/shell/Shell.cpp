@@ -18,7 +18,10 @@ constexpr int kHomeRight = 37;  // rows stop this far from the card edge
 constexpr int kPillY = 32;
 constexpr int kClockBaseline = 242;
 constexpr int kRowsY = 320;
-constexpr int kRowsVisible = 2;
+constexpr int kBottomMargin = 32;  // below the last row on screen
+
+// Home is one tall page (date, clock, then every app row) that scrolls as a
+// whole to keep the selected row on screen.
 
 constexpr unsigned long kClockPollMs = 1000;
 
@@ -65,9 +68,20 @@ void Shell::addApp(App* app) {
   if (appCount_ < kMaxApps) apps_[appCount_++] = app;
 }
 
-void Shell::begin() {
+void Shell::begin(App* resume) {
   rtc_.begin();
-  redraw(true);
+  if (resume == nullptr) {
+    redraw(true);
+    return;
+  }
+  for (int i = 0; i < appCount_; i++) {
+    if (apps_[i] == resume) selected_ = i;
+  }
+  current_ = resume;
+  current_->onOpen();
+  // The framebuffer is blank but the panel still shows the last frame; the
+  // next draw must be a full-quality refresh.
+  forceClean_ = true;
 }
 
 void Shell::invalidate(const bool clean) {
@@ -78,7 +92,7 @@ void Shell::invalidate(const bool clean) {
 bool Shell::flush() {
   if (!dirty_) {
     // The framebuffer still holds what's on the panel: touch up the gutter.
-    if (!chrome_ || litKeys() == keysShown_) return false;
+    if (!chrome_ || forceClean_ || litKeys() == keysShown_) return false;
     redrawKeys();
     return true;
   }
@@ -145,6 +159,7 @@ void Shell::dispatch(const Action action) {
   if (action == Action::Back) slide(kSlideOut, std::size(kSlideOut), false);
 
   if (action == Action::Back && current_->depth() == 0) {
+    current_->onClose();
     current_ = nullptr;
     invalidate();
     return;
@@ -187,7 +202,7 @@ void Shell::slide(const int* offsets, const int count, const bool settle, const 
   }
 
   // Render the page in place once, unless it's already what's on the panel.
-  if (settle || dirty_) drawScreen();
+  if (settle || dirty_ || forceClean_) drawScreen();
   const int stride = renderer_.getDisplayWidthBytes();
   for (int y = 0; y < layout::kScreenH; y++) memcpy(savedLeft[y], fb + y * stride, kSavedBytes);
 
@@ -224,12 +239,13 @@ void Shell::shiftCard(const int from, const int to) {
   renderer_.fillRect(right, 0, layout::kScreenW - right, layout::kScreenH, false);
   drawCardStack(depth(), to);
   drawGutter();
+  if (current_ != nullptr) drawBadge(current_->badge());
 }
 
 void Shell::showPaused() {
   chrome_ = false;
   drawScreen();
-  drawPausedBadge();
+  drawBadge(Badge::Paused);
   renderer_.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
@@ -242,6 +258,7 @@ void Shell::redraw(const bool clean) {
 void Shell::redrawKeys() {
   renderer_.fillRect(layout::kGutterX, 0, layout::kGutterW, layout::kScreenH, false);
   drawGutter();
+  if (current_ != nullptr) drawBadge(current_->badge());
   present(Refresh::Frame);
 }
 
@@ -262,6 +279,7 @@ void Shell::drawScreen(const int slide) {
     drawCardStack(depth(), slide);
     drawGutter();
   }
+  if (current_ != nullptr) drawBadge(current_->badge());
 }
 
 void Shell::drawHome(const layout::Rect& area) {
@@ -270,13 +288,23 @@ void Shell::drawHome(const layout::Rect& area) {
   shownMinute_ = haveTime ? now.hour * 60 + now.minute : -1;
   const int x = area.x + layout::kMarginLeft;
 
+  // Scroll just enough to show the selected row: down when it would pass the
+  // bottom margin, back up when it would rise above where the rows start.
+  const auto& style = ui::kHomeRow;
+  const int rowTop = kRowsY + selected_ * style.pitch;
+  const int viewBottom = area.h - kBottomMargin;
+  if (rowTop + style.height - homeScroll_ > viewBottom) homeScroll_ = rowTop + style.height - viewBottom;
+  if (rowTop - homeScroll_ < kRowsY) homeScroll_ = rowTop - kRowsY;
+  homeScroll_ = std::max(0, homeScroll_);
+  const int top = area.y - homeScroll_;
+
   char date[16];
   if (haveTime) {
     snprintf(date, sizeof(date), "%s %u %s", kWeekdays[now.weekday % 7], now.day, kMonths[(now.month + 11) % 12]);
   } else {
     snprintf(date, sizeof(date), "Clock not set");
   }
-  ui::drawPill(renderer_, fonts::SMALL_15, x, area.y + kPillY, date);
+  ui::drawPill(renderer_, fonts::SMALL_15, x, top + kPillY, date);
 
   char clock[8];
   if (!haveTime) {
@@ -286,17 +314,15 @@ void Shell::drawHome(const layout::Rect& area) {
   } else {
     snprintf(clock, sizeof(clock), "%02u:%02u", now.hour, now.minute);
   }
-  ui::drawTextAt(renderer_, fonts::DISPLAY_136, x, area.y + kClockBaseline, clock);
+  ui::drawTextAt(renderer_, fonts::DISPLAY_136, x, top + kClockBaseline, clock);
 
-  // App rows, a page of kRowsVisible at a time.
-  const auto& style = ui::kHomeRow;
+  // Every row; the clip rect drops the ones scrolled off screen.
   const int w = area.w - layout::kMarginLeft - kHomeRight;
-  const int first = selected_ / kRowsVisible * kRowsVisible;
-  for (int i = first; i < std::min(appCount_, first + kRowsVisible); i++) {
+  for (int i = 0; i < appCount_; i++) {
     char count[12] = "";
     const int n = apps_[i]->itemCount();
     if (n >= 0) snprintf(count, sizeof(count), "%d", n);
-    const layout::Rect row{x, area.y + kRowsY + (i - first) * style.pitch, w, style.height};
+    const layout::Rect row{x, top + kRowsY + i * style.pitch, w, style.height};
     ui::drawRow(renderer_, row, style, apps_[i]->icon(), apps_[i]->name(), count, i == selected_);
   }
 }
@@ -366,27 +392,37 @@ void Shell::drawGutter() {
   }
 }
 
-void Shell::drawPausedBadge() const {
+void Shell::drawBadge(const Badge badge) const {
+  if (badge == Badge::None) return;
   // A key button's size, in the gutter's column, inset from the bottom edge by
   // the same margin the buttons keep from the right edge.
   constexpr int R = layout::kKeyRadius;
   constexpr int cx = layout::kKeyCenterX;
   constexpr int cy = layout::kScreenH - (layout::kScreenW - layout::kKeyCenterX);
   renderer_.fillRoundedRect(cx - R, cy - R, R * 2, R * 2, R, Color::Black);
-  // ❚❚
-  renderer_.fillRect(cx - 6, cy - 6, 4, 13, false);
-  renderer_.fillRect(cx + 2, cy - 6, 4, 13, false);
+  switch (badge) {
+    case Badge::Paused:  // ❚❚
+      renderer_.fillRect(cx - 6, cy - 6, 4, 13, false);
+      renderer_.fillRect(cx + 2, cy - 6, 4, 13, false);
+      break;
+    case Badge::Listening:  // Bluetooth rune
+      ui::drawIcon(renderer_, ui::Icon::Bluetooth, cx - ui::kIconSize / 2, cy - 8, false);
+      break;
+    case Badge::None:
+      break;
+  }
 }
 
 void Shell::present(const Refresh refresh) {
   keysFlash_ = 0;  // the keys pressed are on this frame
-  if (refresh == Refresh::Frame) {
+  if (refresh == Refresh::Frame && !forceClean_) {
     renderer_.displayBuffer(HalDisplay::FAST_REFRESH);
     return;
   }
   // Force a half refresh every N fast pages to clear ghosting; 0 means never.
   const int every = settings::value(settings::kRefresh);
-  if (refresh == Refresh::Clean || (every > 0 && ++fastSinceClean_ >= every)) {
+  if (refresh == Refresh::Clean || forceClean_ || (every > 0 && ++fastSinceClean_ >= every)) {
+    forceClean_ = false;
     fastSinceClean_ = 0;
     renderer_.displayBuffer(HalDisplay::HALF_REFRESH);
   } else {

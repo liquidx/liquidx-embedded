@@ -29,6 +29,9 @@ extern const Choice kRefresh;
 extern const Choice kSleep;
 // 24 or 12.
 extern const Choice kClock;
+// 1 = deep-sleep between Bluetooth frames when the sender says when the next
+// is due (docs/ble-cast-protocol.md); 0 = stay connected.
+extern const Choice kFrameSleep;
 
 void begin();
 int index(const Choice& choice);

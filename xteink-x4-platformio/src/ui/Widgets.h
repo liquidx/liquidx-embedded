@@ -10,9 +10,16 @@
 namespace ui {
 
 // Small line icons, drawn in a kIconSize square.
-enum class Icon : uint8_t { None, Image, Sliders };
+enum class Icon : uint8_t { None, Image, Sliders, Bluetooth };
 constexpr int kIconSize = 18;
 void drawIcon(GfxRenderer& r, Icon icon, int x, int y, bool black);
+
+// Where an image of `size` pixels starts along an axis of `avail`: centred when
+// it fits, otherwise pinned to the start (the clip rect crops the rest).
+int imageOrigin(int size, int avail);
+// Draw a BMP file at native resolution in `area`, never scaled. Returns false
+// if it can't be opened or decoded.
+bool drawBitmapFile(GfxRenderer& r, const char* path, const layout::Rect& area);
 
 // Draw `text` with its baseline at `baseline` (drawText takes the line top).
 void drawTextAt(GfxRenderer& r, int font, int x, int baseline, const char* text, bool black = true,

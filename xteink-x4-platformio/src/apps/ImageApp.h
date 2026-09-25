@@ -17,10 +17,14 @@ class ImageApp : public App {
   void render(GfxRenderer& r, const layout::Rect& area, bool chrome) override;
   Result handle(Action action) override;
 
+  // Something else wrote to /images: rescan before the next count.
+  static void markStale() { stale_ = true; }
+
  private:
   void scan();
 
   std::vector<std::string> files_;
   int index_ = 0;
   bool scanned_ = false;
+  static inline bool stale_ = false;
 };
