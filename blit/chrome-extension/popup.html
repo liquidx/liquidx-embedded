@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blit this tab</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { width: 340px; }
+  header { padding: 12px 14px 10px; display: grid; gap: 6px; }
+  .title { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  #tabName { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #regionText { font-size: 12px; margin: 6px 0 0; }
+  footer { padding: 12px 14px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; }
+  footer button { flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <h1>Blit</h1>
+    <span id="state" class="chip">Not running</span>
+  </div>
+  <div id="tabName">–</div>
+  <p id="unavailable" class="note err" hidden>Chrome doesn't let extensions capture this page (browser and Web Store pages). Open a regular web page.</p>
+</header>
+
+<section>
+  <h2>What to blit</h2>
+  <div class="row">
+    <div>
+      <select id="regionType" aria-label="Region">
+        <option value="viewport">Whole visible tab</option>
+        <option value="element">One element…</option>
+        <option value="rect">A rectangle…</option>
+      </select>
+    </div>
+    <button id="pick" class="secondary small" style="flex:0 0 auto" hidden>Pick on page</button>
+  </div>
+  <p id="regionText" class="muted"></p>
+</section>
+
+<section>
+  <h2>Scaling and pixels</h2>
+  <div class="row">
+    <div>
+      <label for="fit">Fit to display</label>
+      <select id="fit">
+        <option value="contain">Fit (letterbox)</option>
+        <option value="cover">Fill (crop edges)</option>
+        <option value="stretch">Stretch</option>
+        <option value="actual">Actual pixels</option>
+      </select>
+    </div>
+    <div id="zoomBox">
+      <label for="zoom">Zoom</label>
+      <input id="zoom" type="number" min="0.25" max="4" step="0.25">
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="format">Pixels</label>
+      <select id="format">
+        <option value="auto">Display's choice</option>
+        <option value="1">1-bit</option>
+        <option value="2">4 greys</option>
+        <option value="3">16 greys</option>
+      </select>
+    </div>
+    <div>
+      <label for="dither">Dither</label>
+      <select id="dither">
+        <option value="atkinson">Atkinson</option>
+        <option value="floyd">Floyd–Steinberg</option>
+        <option value="threshold">None (crisp text)</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="contrast">Contrast</label>
+      <input id="contrast" type="number" min="0.5" max="3" step="0.1">
+    </div>
+    <label class="check" style="flex:1 1 90px"><input id="invert" type="checkbox"> Invert</label>
+  </div>
+</section>
+
+<section>
+  <h2>Updates</h2>
+  <div class="row">
+    <div style="flex:2 1 150px">
+      <label for="update">Send</label>
+      <select id="update">
+        <option value="live">When the page changes</option>
+        <option value="interval">On a fixed interval</option>
+        <option value="manual">Only when asked</option>
+      </select>
+    </div>
+    <div id="secondsBox">
+      <label for="seconds" id="secondsLabel">Check every (s)</label>
+      <input id="seconds" type="number" min="1" max="3600" step="1">
+    </div>
+  </div>
+  <p id="updateNote" class="note"></p>
+  <div class="row">
+    <div>
+      <label for="capture">Capture</label>
+      <select id="capture">
+        <option value="stream">Tab stream (works in the background)</option>
+        <option value="screenshot">Screenshot (tab must be visible)</option>
+      </select>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Display buttons</h2>
+  <div class="row">
+    <div>
+      <select id="buttons" aria-label="Display buttons">
+        <option value="scroll">Scroll the page</option>
+        <option value="keys">Press keys in the page</option>
+        <option value="off">Ignore</option>
+      </select>
+    </div>
+  </div>
+  <label class="check"><input id="taps" type="checkbox"> Taps on a touch display click the page</label>
+  <label class="check"><input id="persist" type="checkbox"> Display keeps each frame (e.g. on its SD card)</label>
+  <label class="check"><input id="allSites" type="checkbox"> Keep working after the page navigates</label>
+</section>
+
+<footer>
+  <button id="start">Start blitting</button>
+  <button id="sendNow" class="secondary" hidden>Send now</button>
+  <button id="show" class="secondary" hidden>Show session</button>
+  <button id="stop" class="secondary" hidden>Stop</button>
+</footer>
+
+<script type="module" src="popup.js"></script>
+</body>
+</html>

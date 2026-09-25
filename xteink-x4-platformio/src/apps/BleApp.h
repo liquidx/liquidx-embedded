@@ -3,7 +3,7 @@
 #include "../ble/CastServer.h"
 #include "../shell/App.h"
 
-// A remote screen over Bluetooth LE (docs/ble-cast-protocol.md). While open,
+// A remote screen over Bluetooth LE (blit/PROTOCOL.md at the repo root). While open,
 // the device advertises and shows the last frame it received, or "Listening".
 // The title pill shows the link status. Frames are saved to /images unless the
 // sender turns persist off. Leaving the app turns the radio off.

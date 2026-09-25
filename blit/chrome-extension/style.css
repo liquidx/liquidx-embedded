@@ -1,0 +1,63 @@
+:root {
+  --ink: #111;
+  --paper: #fff;
+  --muted: #6b6b6b;
+  --line: #d9d9d6;
+  --soft: #f3f3f1;
+  --ok: #1f7a3a;
+  --err: #b3261e;
+  --accent: #e5484d;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #eee;
+    --paper: #1c1c1b;
+    --muted: #9a9a96;
+    --line: #3a3a38;
+    --soft: #262625;
+    --ok: #5cc27a;
+    --err: #ff8a80;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 13px/1.45 ui-monospace, "IBM Plex Mono", SFMono-Regular, Menlo, monospace;
+  color: var(--ink);
+  background: var(--paper);
+}
+h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 8px; color: var(--muted); }
+section { padding: 12px 14px; border-top: 1px solid var(--line); }
+label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+select, input[type=number] {
+  width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--paper); color: var(--ink);
+}
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+.row > * { flex: 1 1 90px; min-width: 0; }
+.row + .row { margin-top: 8px; }
+.check { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 12px; margin: 8px 0 0; }
+button {
+  font: inherit; font-weight: 600; cursor: pointer;
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--ink);
+  background: var(--ink); color: var(--paper);
+}
+button.secondary { background: var(--paper); color: var(--ink); }
+button.small { padding: 3px 10px; font-size: 12px; }
+button:disabled { opacity: .35; cursor: default; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); font-size: 12px;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chip::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: #bbb; }
+.chip.on { color: var(--ink); }
+.chip.on::before { background: var(--ok); }
+.chip.warn::before { background: var(--accent); }
+.note { color: var(--muted); font-size: 11px; margin: 6px 0 0; }
+.err { color: var(--err); }
+.ok { color: var(--ok); }
+.muted { color: var(--muted); }
+[hidden] { display: none !important; }

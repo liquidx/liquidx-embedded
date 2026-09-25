@@ -1,9 +1,9 @@
-// Example: embed ble-cast in a webapp and cast one of its elements.
-import { BleCast } from '../../lib/ble-cast.js';
+// Example: embed blit in a webapp and blit one of its elements.
+import { Blit } from '../../../js/blit.js';
 
 const $ = (id) => document.getElementById(id);
 const screen = $('screen');
-const cast = new BleCast();
+const cast = new Blit({ hostName: 'blit clock' });
 let frames = 0;
 let timer = null;
 
@@ -62,10 +62,10 @@ async function send() {
   }
 }
 
-function sizeToDevice(info) {
-  // Pixel-exact: make the element exactly the device's frame area.
-  screen.style.width = `${info.w}px`;
-  screen.style.height = `${info.h}px`;
+function sizeToDevice(caps) {
+  // Pixel-exact: make the element exactly the display's frame area.
+  screen.style.width = `${caps.width}px`;
+  screen.style.height = `${caps.height}px`;
 }
 
 $('connect').addEventListener('click', async () => {
@@ -78,11 +78,14 @@ $('connect').addEventListener('click', async () => {
 
 cast.addEventListener('connected', (e) => {
   sizeToDevice(e.detail);
-  status(`Connected to ${e.detail.name} (${e.detail.w}×${e.detail.h})`, 'ok');
+  status(`Connected to ${e.detail.name} (${e.detail.width}×${e.detail.height})`, 'ok');
   $('send').disabled = false;
   $('auto').disabled = false;
   $('connect').textContent = 'Reconnect';
 });
+cast.addEventListener('caps', (e) => sizeToDevice(e.detail));
+// Any button on the display asks for a fresh frame.
+cast.addEventListener('key', (e) => e.detail.action === 'press' && send());
 cast.addEventListener('disconnected', () => {
   if (!timer) status('Disconnected');
 });

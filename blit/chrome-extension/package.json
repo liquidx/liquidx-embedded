@@ -1,0 +1,15 @@
+{
+  "name": "blit-chrome-extension",
+  "private": true,
+  "description": "Chrome extension that blits a browser tab to a blit display. See README.md.",
+  "type": "module",
+  "scripts": {
+    "dev": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "build": "node build.mjs --dist",
+    "test": "node --test ../js/test/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

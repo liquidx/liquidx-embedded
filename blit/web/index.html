@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ble-cast</title>
+<title>blit</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -78,6 +78,7 @@
   .thumbs figcaption { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .thumbs .remove { position: absolute; top: 4px; right: 4px; padding: 0 7px; font-size: 12px; line-height: 20px; }
   .preview-wrap { background: var(--soft); border-radius: 10px; padding: 12px; overflow: auto; }
+  #simScreen { display: block; image-rendering: pixelated; background: #fff; box-shadow: 0 0 0 1px var(--line); max-width: 100%; cursor: crosshair; }
   #preview { display: block; image-rendering: pixelated; background: #fff; box-shadow: 0 0 0 1px var(--line); max-width: 100%; }
   .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 12px; }
   .meta b { color: var(--ink); font-weight: 500; }
@@ -92,11 +93,12 @@
 </head>
 <body>
 <header>
-  <h1>ble-cast</h1>
+  <h1>blit</h1>
   <span id="chip" class="chip">Not connected</span>
   <span class="spacer"></span>
-  <a class="link" href="examples/clock/">Example: cast a live element →</a>
+  <a class="link" href="examples/clock/">Example: blit a live element →</a>
   <button id="connect">Connect</button>
+  <button id="simulate" class="secondary" title="A simulated display in this page, for trying things without hardware">Simulator</button>
   <button id="disconnect" class="secondary" hidden>Disconnect</button>
 </header>
 
@@ -110,8 +112,8 @@
         <div>
           <label for="size">Size</label>
           <select id="size">
-            <option value="device">Device area</option>
-            <option value="full">Full screen 800×480</option>
+            <option value="device">Frame area</option>
+            <option value="full">Whole panel</option>
           </select>
         </div>
         <div>
@@ -121,6 +123,15 @@
             <option value="contain">Contain</option>
             <option value="none">Native</option>
             <option value="stretch">Stretch</option>
+          </select>
+        </div>
+        <div>
+          <label for="format">Pixels</label>
+          <select id="format">
+            <option value="auto">Display's choice</option>
+            <option value="1">1-bit</option>
+            <option value="2">4 greys</option>
+            <option value="3">16 greys</option>
           </select>
         </div>
         <div>
@@ -142,7 +153,7 @@
           <input id="threshold" type="number" min="1" max="254" step="1" value="128">
         </div>
       </div>
-      <label class="check"><input id="persist" type="checkbox"> Save to the SD card</label>
+      <label class="check"><input id="persist" type="checkbox"> Save on the display (the X4 saves to its SD card)</label>
     </section>
 
     <section id="tab-images" class="stack">
@@ -164,7 +175,7 @@
         <button id="startShow" class="secondary" disabled>Start slideshow</button>
         <button id="stopShow" class="secondary" hidden>Stop</button>
       </div>
-      <p class="note">The interval is sent as the next-frame hint, so with Settings → Frame sleep on the device naps between images (gaps of 30 s or more).</p>
+      <p class="note">The interval is sent as the next-frame hint, so a display that supports it (the X4 with Settings → Frame sleep on) naps between images (gaps of 30 s or more).</p>
     </section>
 
   </div>
@@ -176,10 +187,35 @@
         <span>Device <b id="mName">–</b></span>
         <span>Area <b id="mArea">–</b></span>
         <span>Chunk <b id="mChunk">–</b></span>
+        <span>Formats <b id="mFormats">–</b></span>
+        <span>Protocol <b id="mVersion">–</b></span>
         <span>Frame sleep <b id="mSleep">–</b></span>
       </div>
       <div class="preview-wrap"><canvas id="preview" width="716" height="480"></canvas></div>
       <progress id="progress" value="0" max="1"></progress>
+    </section>
+
+    <section id="simSection" class="stack" hidden>
+      <h2>Simulated display</h2>
+      <div class="preview-wrap"><canvas id="simScreen" width="400" height="300"></canvas></div>
+      <div class="row sim-keys">
+        <button class="secondary" data-key="1">Up</button>
+        <button class="secondary" data-key="2">Down</button>
+        <button class="secondary" data-key="3">Left</button>
+        <button class="secondary" data-key="4">Right</button>
+        <button class="secondary" data-key="5">Select</button>
+      </div>
+      <div class="row">
+        <div>
+          <label for="simMode">Display asks for</label>
+          <select id="simMode">
+            <option value="1">1-bit, 400×300</option>
+            <option value="3">16 greys, 400×300</option>
+            <option value="3-small">16 greys, 200×150</option>
+          </select>
+        </div>
+      </div>
+      <p class="note">Changing what the display asks for sends a caps event; the next frame follows it. Keys and clicks on the screen go to the host as events.</p>
     </section>
 
     <section>

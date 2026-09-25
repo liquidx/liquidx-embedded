@@ -10,7 +10,15 @@ README, build config, and helper scripts.
 | --- | --- | --- | --- |
 | [`m5stack-resident/`](m5stack-resident/) | M5StickS3 (ESP32-S3) | PlatformIO + [Resident](https://resident.inanimate.tech/) | Lua apps pushed over the Resident relay |
 | [`xteink-x4-platformio/`](xteink-x4-platformio/) | Xteink X4 (ESP32-C3, e-paper) | PlatformIO + [FreeInk SDK](https://github.com/Free-Ink/freeink-sdk) | Landscape shell firmware: image viewer, Bluetooth receiver, settings |
-| [`ble-cast/`](ble-cast/) | Any Chrome/Edge browser | Web Bluetooth, no build | Sends images and live page captures to the X4's Bluetooth app |
+
+## Shared protocols
+
+Some folders aren't tied to one device: they define how devices talk to each
+other, with implementations for several hosts. These use a plain name.
+
+| Folder | What | Notes |
+| --- | --- | --- |
+| [`blit/`](blit/) | [blit protocol](blit/PROTOCOL.md): pixels to low-power displays over BLE, button presses back | JS host library, web demo, Chrome extension, simulated display. The X4 is a display. |
 
 ## Conventions
 
