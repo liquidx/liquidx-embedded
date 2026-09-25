@@ -34,7 +34,7 @@ captions to give the page the whole 800 × 480 screen.
   X4C the two side keys are then on the top and bottom edges, near the left.
 
 The front keys drive the whole UI. The gutter has a round button beside each
-one: ◀ ● ▲ ▼.
+one: ◀ ● ▲ ▼. A button shows inverted while its key is held down.
 
 | Key (landscape) | Action |
 | --- | --- |

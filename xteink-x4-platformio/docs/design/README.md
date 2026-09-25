@@ -4,7 +4,8 @@ Device: 800×480 landscape, 1-bit e-ink. PNGs are 1:1 device pixels.
 
 ## Layout
 - Canvas: x 0–728. Button gutter: x 728–800 (72px), plain white.
-- Gutter: battery glyph at (751,24) 26×14; four 48px black circles at x=740, y=73/161/269/357: ◀ Back/Home, ● Select, ▲ Up, ▼ Down. Always all four shown, even when inert.
+- Gutter: battery glyph at (751,24) 26×14; four 48px black circles at x=740, y=73/161/269/357: ◀ Back/Home, ● Select, ▲ Up, ▼ Down. Always all four shown, even when inert. While its key is held (or on the frame after a quick tap) a button shows inverted: white with a 2px black ring and a black glyph.
+- Transitions: entering a page, the new card slides in from the left, shown 64px then 16px short of its place before settling; on Back, the leaving card is shown 10px to the left first.
 - Every page is a card: white, 1px black border, radius 22px on the right corners only, full height (bleeds off top/bottom/left).
 - Back stack: depth n card width = 728 − 12n. Previous cards remain drawn beneath, so their right edges peek out beside the gutter (one edge per level).
 - All selectable options are stacked vertically; selected item = black pill, white text. No horizontal choices.
