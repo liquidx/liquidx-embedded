@@ -156,7 +156,7 @@ src/
     BleApp.*          Bluetooth remote screen
     SettingsApp.*     settings list, choice pages, About
   ble/
-    CastServer.*      BLE GATT server for the cast protocol
+    CastServer.*      BLE GATT server for the blit protocol (v1)
   Settings.*          persisted settings (NVS) and their options
 fonts/                IBM Plex Mono TTFs (OFL); scripts/fonts.sh turns them into headers
 docs/design/          visual spec and mockups
@@ -175,8 +175,9 @@ last one saved), or "Listening". The title pill shows the link status:
 Listening, Connected, Receiving, "Next in N s" (the sender's interval), or
 Transfer failed; a Bluetooth badge in the corner marks a frame as live.
 
-- Send from a browser with [`ble-cast`](../ble-cast/) (Chrome/Edge, Web
-  Bluetooth): images, slideshows, or a live capture of a web page.
+- Send from a browser with the [blit web demo](../blit/web/) (Chrome/Edge,
+  Web Bluetooth): images, slideshows, or a live capture of a web page. Or
+  blit any tab with the [Chrome extension](../blit/chrome-extension/).
 - Frames are 1-bit at the device's frame area (716 × 480, or 800 × 480 with
   chrome hidden) and are drawn at native size, like Images.
 - Frames are saved to `/images` as BMPs unless the sender turns `persist` off.
@@ -185,8 +186,10 @@ Transfer failed; a Bluetooth badge in the corner marks a frame as live.
   screen, then wakes back into the Bluetooth app. Gaps under 30 s don't sleep.
   The original X4 can't wake on a timer, so it stays awake.
 
-Wire format: [docs/ble-cast-protocol.md](docs/ble-cast-protocol.md). The
-receiver is `src/ble/CastServer.*` (NimBLE) and `src/apps/BleApp.*`.
+Wire format: the [blit protocol](../blit/PROTOCOL.md). The X4 speaks v1
+(1-bit full frames); v2 adds greyscale, regions, compression and sending the
+keys back to the host. The receiver is `src/ble/CastServer.*` (NimBLE) and
+`src/apps/BleApp.*`.
 
 ## Status / next
 
@@ -196,7 +199,9 @@ receiver is `src/ble/CastServer.*` (NimBLE) and `src/apps/BleApp.*`.
 - [x] Serial screenshot tool
 - [x] BMP image viewer
 - [x] Settings: refresh interval, sleep timer, 12/24h clock, storage, About
-- [x] Bluetooth remote screen ([ble-cast](../ble-cast/)), sleep between frames
+- [x] Bluetooth remote screen ([blit](../blit/) v1), sleep between frames
+- [ ] blit v2: forward Up / Down / Select to the host, caps events on chrome
+      toggle, 2-bit greyscale, PackBits, regions
 - [ ] Wi-Fi: scan, join, save credentials (start with `/wifi.txt` on SD)
 - [x] Persist settings
 - [ ] Persist last app

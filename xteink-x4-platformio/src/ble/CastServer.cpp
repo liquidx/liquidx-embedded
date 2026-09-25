@@ -15,7 +15,7 @@ CastServer server;
 
 namespace {
 
-// docs/ble-cast-protocol.md#gatt-layout
+// blit/PROTOCOL.md#transport-bluetooth-le-gatt (repo root)
 constexpr const char* kServiceUuid = "b1ec0000-5f3a-4e62-9a47-0c3d8e5f2a10";
 constexpr const char* kInfoUuid = "b1ec0001-5f3a-4e62-9a47-0c3d8e5f2a10";
 constexpr const char* kControlUuid = "b1ec0002-5f3a-4e62-9a47-0c3d8e5f2a10";

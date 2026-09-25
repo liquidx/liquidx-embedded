@@ -1,11 +1,13 @@
-// Demo page for lib/ble-cast.js: send images, or run a slideshow.
-import { BleCast, rasterize } from './lib/ble-cast.js';
+// Demo page for ../js/blit.js: send images, or run a slideshow, to a display
+// over Web Bluetooth or to a simulated display in the page.
+import { Blit, FORMAT, FORMAT_INFO, KEY, rasterize } from '../js/blit.js';
+import { SimDisplay, SimTransport } from '../js/sim-display.js';
 
-const FULL = { w: 800, h: 480 };
-const DEFAULT_AREA = { w: 716, h: 480 }; // before a device reports its own
+const DEFAULT_AREA = { w: 716, h: 480 }; // before a display reports its own
 
 const $ = (id) => document.getElementById(id);
-const cast = new BleCast();
+const cast = new Blit({ hostName: 'blit demo' });
+let sim = null;
 
 const images = []; // { name, url, img }
 let selected = -1;
@@ -21,9 +23,17 @@ function log(message, kind = '') {
 }
 
 function frameSize() {
-  if ($('size').value === 'full') return FULL;
-  const info = cast.info;
-  return info ? { w: info.w, h: info.h } : DEFAULT_AREA;
+  const caps = cast.caps;
+  if (!caps) return DEFAULT_AREA;
+  if ($('size').value === 'full') return { w: caps.panel.width, h: caps.panel.height };
+  return { w: caps.width, h: caps.height };
+}
+
+function frameFormat() {
+  const chosen = $('format').value;
+  if (chosen === 'auto' || !cast.caps) return cast.caps ? cast.preferredFormat() : FORMAT.MONO1;
+  const format = Number(chosen);
+  return cast.caps.formats.includes(format) ? format : FORMAT.MONO1;
 }
 
 function frameOptions() {
@@ -31,6 +41,7 @@ function frameOptions() {
   return {
     width: w,
     height: h,
+    format: frameFormat(),
     fit: $('fit').value,
     dither: $('dither').value,
     contrast: Number($('contrast').value) || 1,
@@ -61,8 +72,8 @@ async function send(source, extra = {}) {
     return;
   }
   const opts = { ...frameOptions(), ...extra, onRaster: showPreview };
-  // In "device area" mode let sendImage() size the frame from fresh Info: the
-  // area changes when the device's chrome is toggled.
+  // In "frame area" mode let sendImage() size the frame from fresh caps: the
+  // area changes when the display's chrome is toggled.
   if ($('size').value === 'device') {
     delete opts.width;
     delete opts.height;
@@ -90,21 +101,24 @@ function updateButtons() {
 }
 
 function updateMeta() {
-  const info = cast.info;
+  const caps = cast.caps;
   $('mName').textContent = cast.deviceName ?? '–';
-  $('mArea').textContent = info ? `${info.w}×${info.h}` : '–';
-  $('mChunk').textContent = info ? `${info.chunk} B` : '–';
-  $('mSleep').textContent = info ? (info.frameSleep ? 'on' : 'off') : '–';
+  $('mArea').textContent = caps ? `${caps.width}×${caps.height}` : '–';
+  $('mChunk').textContent = caps ? `${caps.chunk} B` : '–';
+  $('mFormats').textContent = caps ? caps.formats.map((f) => FORMAT_INFO[f]?.name ?? f).join(', ') : '–';
+  $('mVersion').textContent = caps ? `v${caps.version}` : '–';
+  $('mSleep').textContent = caps ? (caps.features.frameSleep ? 'on' : 'off') : '–';
   const chip = $('chip');
   chip.textContent = cast.connected ? `Connected to ${cast.deviceName}` : cast.deviceName ? `${cast.deviceName} (disconnected)` : 'Not connected';
   chip.classList.toggle('on', cast.connected);
   $('connect').hidden = cast.connected;
+  $('simulate').hidden = cast.connected;
   $('disconnect').hidden = !cast.connected;
 }
 
 // --- connection ------------------------------------------------------------
 
-if (!BleCast.supported) $('unsupported').hidden = false;
+if (!Blit.supported) $('unsupported').hidden = false;
 
 $('connect').addEventListener('click', async () => {
   try {
@@ -115,8 +129,69 @@ $('connect').addEventListener('click', async () => {
 });
 $('disconnect').addEventListener('click', () => cast.disconnect());
 
+// --- simulated display -----------------------------------------------------
+
+const SIM_MODES = {
+  1: { width: 400, height: 300, formats: [FORMAT.MONO1, FORMAT.GRAY2, FORMAT.GRAY4] },
+  3: { width: 400, height: 300, formats: [FORMAT.GRAY4, FORMAT.GRAY2, FORMAT.MONO1] },
+  '3-small': { width: 200, height: 150, formats: [FORMAT.GRAY4, FORMAT.GRAY2, FORMAT.MONO1] },
+};
+
+function drawSim() {
+  const canvas = $('simScreen');
+  canvas.width = sim.caps.width;
+  canvas.height = sim.caps.height;
+  canvas.getContext('2d').putImageData(sim.imageData(), 0, 0);
+}
+
+$('simulate').addEventListener('click', async () => {
+  if (!sim) {
+    sim = new SimDisplay({ name: 'Simulator', ...SIM_MODES[$('simMode').value], refreshMs: 400 });
+    sim.addEventListener('frame', drawSim);
+    sim.addEventListener('caps', drawSim);
+    sim.addEventListener('log', (e) => log(`display: ${e.detail}`));
+  }
+  $('simSection').hidden = false;
+  drawSim();
+  await cast.connectTransport(new SimTransport(sim));
+});
+
+for (const button of document.querySelectorAll('[data-key]')) {
+  button.addEventListener('click', () => sim?.pressKey(Number(button.dataset.key)));
+}
+$('simScreen').addEventListener('click', (e) => {
+  const canvas = e.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  sim?.tap(((e.clientX - rect.left) * canvas.width) / rect.width, ((e.clientY - rect.top) * canvas.height) / rect.height);
+});
+$('simMode').addEventListener('change', () => sim?.setCaps(SIM_MODES[$('simMode').value]));
+
+// --- events from the display -------------------------------------------------
+
+cast.addEventListener('caps', (e) => {
+  log(`Display asks for ${e.detail.width}×${e.detail.height}, ${FORMAT_INFO[e.detail.formats[0]]?.name}`);
+  updateMeta();
+  previewSource(currentSource());
+});
+
+// Buttons on the display step through the images.
+cast.addEventListener('key', (e) => {
+  log(`Key: ${e.detail.name} (${e.detail.action})`);
+  if (!images.length || e.detail.action !== 'press') return;
+  const step = { [KEY.UP]: -1, [KEY.LEFT]: -1, [KEY.PAGE_PREV]: -1, [KEY.DOWN]: 1, [KEY.RIGHT]: 1, [KEY.PAGE_NEXT]: 1 }[e.detail.key];
+  if (step) {
+    selected = (Math.max(0, selected) + step + images.length) % images.length;
+    renderThumbs();
+  }
+  if (step || e.detail.key === KEY.SELECT) {
+    const item = images[selected];
+    send(item.img, { name: stripExt(item.name) }).catch(() => {});
+  }
+});
+cast.addEventListener('pointer', (e) => log(`Pointer: ${e.detail.action} at ${e.detail.x}, ${e.detail.y}`));
+
 cast.addEventListener('connected', (e) => {
-  log(`Connected to ${e.detail.name}: ${e.detail.w}×${e.detail.h}, ${e.detail.chunk} B chunks`, 'ok');
+  log(`Connected to ${e.detail.name}: ${e.detail.width}×${e.detail.height}, protocol v${e.detail.version}, ${e.detail.chunk} B chunks`, 'ok');
   updateMeta();
   updateButtons();
   previewSource(currentSource());
@@ -133,7 +208,7 @@ cast.addEventListener('progress', (e) => {
 
 // --- frame options ---------------------------------------------------------
 
-for (const id of ['size', 'fit', 'dither', 'contrast', 'threshold']) {
+for (const id of ['size', 'format', 'fit', 'dither', 'contrast', 'threshold']) {
   $(id).addEventListener('change', () => {
     updateMeta();
     previewSource(currentSource());

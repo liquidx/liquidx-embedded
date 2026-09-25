@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blit session</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { background: var(--soft); }
+  header { padding: 12px 14px; background: var(--paper); display: grid; gap: 8px; }
+  .title { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  #target { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  section { background: var(--paper); margin: 10px; border: 1px solid var(--line); border-radius: 12px; }
+  .screen { background: var(--soft); border-radius: 8px; padding: 8px; overflow: auto; }
+  canvas { display: block; max-width: 100%; image-rendering: pixelated; background: #fff; box-shadow: 0 0 0 1px var(--line); }
+  #simScreen { cursor: crosshair; }
+  .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 11px; margin-top: 8px; }
+  .meta b { color: var(--ink); font-weight: 600; }
+  #log { font-size: 11px; max-height: 160px; overflow: auto; margin: 0; white-space: pre-wrap; color: var(--muted); }
+  .buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+  video { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <h1>Blit</h1>
+    <span id="chip" class="chip">No display</span>
+  </div>
+  <div id="target">–</div>
+  <div class="buttons">
+    <button id="connect">Connect display</button>
+    <button id="simulate" class="secondary" title="A simulated display in this window, for trying things without hardware">Simulator</button>
+    <button id="disconnect" class="secondary" hidden>Disconnect</button>
+    <button id="sendNow" class="secondary" disabled>Send now</button>
+    <button id="pause" class="secondary" disabled>Pause</button>
+  </div>
+  <p id="unsupported" class="note err" hidden>No Web Bluetooth in this browser. The simulator still works.</p>
+</header>
+
+<section>
+  <h2>Sent to the display</h2>
+  <div class="screen"><canvas id="preview" width="400" height="240"></canvas></div>
+  <div class="meta">
+    <span>Area <b id="mArea">–</b></span>
+    <span>Pixels <b id="mFormat">–</b></span>
+    <span>Last <b id="mLast">–</b></span>
+    <span>Sent <b id="mSent">0</b></span>
+    <span>Unchanged <b id="mSkipped">0</b></span>
+  </div>
+</section>
+
+<section id="simSection" hidden>
+  <h2>Simulated display</h2>
+  <div class="screen"><canvas id="simScreen" width="400" height="300"></canvas></div>
+  <div class="buttons" style="margin-top:8px">
+    <button class="secondary small" data-key="1">Up</button>
+    <button class="secondary small" data-key="2">Down</button>
+    <button class="secondary small" data-key="3">Left</button>
+    <button class="secondary small" data-key="4">Right</button>
+    <button class="secondary small" data-key="5">Select</button>
+    <select id="simMode" style="width:auto;flex:1">
+      <option value="mono">1-bit, 400×300</option>
+      <option value="gray">16 greys, 400×300</option>
+      <option value="x4">X4-like: 1-bit, 716×480</option>
+    </select>
+  </div>
+  <p class="note">Clicks on the simulated screen are sent as taps.</p>
+</section>
+
+<section>
+  <h2>Log</h2>
+  <pre id="log"></pre>
+</section>
+
+<video id="video" muted playsinline></video>
+<script type="module" src="session.js"></script>
+</body>
+</html>

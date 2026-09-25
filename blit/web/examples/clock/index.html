@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ble-cast clock</title>
+<title>blit clock</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" crossorigin="anonymous">
@@ -51,10 +51,10 @@
 <main>
   <div class="panel controls">
     <div class="row" style="justify-content: space-between">
-      <h1>ble-cast clock</h1>
+      <h1>blit clock</h1>
       <a href="../../">← back</a>
     </div>
-    <p style="margin:0;color:var(--muted);font-size:12px">The panel on the right is ordinary HTML. It's captured in place with <code>captureElement()</code> (no screen sharing), dithered to 1 bit and sent to the X4's Bluetooth app.</p>
+    <p style="margin:0;color:var(--muted);font-size:12px">The panel on the right is ordinary HTML. It's captured in place with <code>captureElement()</code> (no screen sharing), converted to the pixel format the display asks for, and sent to it. Buttons on the display ask for a fresh frame.</p>
     <div class="row">
       <button id="connect">Connect</button>
       <button id="send" class="secondary" disabled>Send now</button>

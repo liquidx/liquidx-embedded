@@ -5,12 +5,12 @@
 #include <cstdint>
 
 // BLE cast receiver: a GATT server that accepts frames per
-// docs/ble-cast-protocol.md. NimBLE runs its callbacks on its own task, which
+// the blit protocol, v1 (../blit/PROTOCOL.md at the repo root). NimBLE runs its callbacks on its own task, which
 // only buffers bytes; the main loop takes finished frames with takeFrame(),
 // shows them, then replies with notifyDone() / notifyError().
 namespace cast {
 
-// Frame formats (docs/ble-cast-protocol.md#formats).
+// Pixel formats (blit/PROTOCOL.md#pixel-formats).
 constexpr uint8_t kFormatRaw1 = 1;
 
 constexpr uint8_t kFlagPersist = 0x01;
