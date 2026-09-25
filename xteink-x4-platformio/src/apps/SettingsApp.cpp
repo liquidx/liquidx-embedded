@@ -16,9 +16,9 @@
 namespace {
 
 // A settings row: either a choice, or (choice == nullptr) a fixed row.
-enum class Row : uint8_t { Refresh, Sleep, Clock, SdCard, About, Count };
+enum class Row : uint8_t { Refresh, Sleep, Clock, FrameSleep, SdCard, About, Count };
 constexpr int kRowCount = static_cast<int>(Row::Count);
-constexpr const char* kRowLabels[kRowCount] = {"Refresh", "Sleep after", "Clock", "Storage", "About"};
+constexpr const char* kRowLabels[kRowCount] = {"Refresh", "Sleep after", "Clock", "Frame sleep", "Storage", "About"};
 
 const settings::Choice* rowChoice(const int index) {
   switch (static_cast<Row>(index)) {
@@ -28,6 +28,8 @@ const settings::Choice* rowChoice(const int index) {
       return &settings::kSleep;
     case Row::Clock:
       return &settings::kClock;
+    case Row::FrameSleep:
+      return &settings::kFrameSleep;
     default:
       return nullptr;
   }

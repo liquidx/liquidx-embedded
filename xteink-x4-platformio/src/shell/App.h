@@ -13,6 +13,14 @@ enum class Result : uint8_t {
   CleanRedraw,  // repaint with a half refresh to clear ghosting (new image, new page)
 };
 
+// Status shown as a round badge in the bottom-right corner, the size of a key
+// button and in the gutter's column.
+enum class Badge : uint8_t {
+  None,
+  Paused,     // asleep after the idle timeout (drawn by the shell)
+  Listening,  // Bluetooth on, waiting for the next frame
+};
+
 // An app owns its page card while open. The shell owns home, the gutter, the
 // card stack, chrome visibility and refresh.
 class App {
@@ -27,6 +35,8 @@ class App {
 
   // Called each time the app is opened from home. Reset to the top level.
   virtual void onOpen() {}
+  // Called when the user leaves the app for home.
+  virtual void onClose() {}
 
   // Draw into `area` (already cleared to white and clipped): the top card, or
   // the whole screen with `chrome` off. With `chrome` off, skip titles,
@@ -41,9 +51,20 @@ class App {
   // adds a card to the visible back stack.
   virtual int depth() const { return 0; }
 
+  // Status badge for what's on screen now (see Badge). Drawn over the page,
+  // with or without chrome.
+  virtual Badge badge() const { return Badge::None; }
+
   // Called from the main loop while the app is open and its page is on
   // screen. For slow work that shouldn't hold up showing the page: do a
   // bounded slice per call, and report busy() until it's finished.
   virtual Result tick() { return Result::Ignored; }
   virtual bool busy() const { return false; }
+
+  // True (once) if something outside the keys happened that should hold off
+  // auto-sleep, e.g. a frame arriving over Bluetooth.
+  virtual bool takeActivity() { return false; }
+  // Seconds the app wants the device to deep-sleep for now, then wake back
+  // into this app (0 = no request). Taken once, after the screen is drawn.
+  virtual uint32_t takeSleepRequest() { return 0; }
 };

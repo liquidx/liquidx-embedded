@@ -16,7 +16,9 @@ class Shell {
   Shell(GfxRenderer& renderer, Rtc& rtc) : renderer_(renderer), rtc_(rtc) {}
 
   void addApp(App* app);
-  void begin();
+  // Draw the first screen: home, or with `resume` that app, left as whatever
+  // the panel already shows (after a timed sleep) until something changes.
+  void begin(App* resume = nullptr);
 
   // Apply one action to shell/app state. Drawing is deferred to flush() so a
   // burst of queued presses costs a single refresh.
@@ -33,6 +35,11 @@ class Shell {
   // flat out instead of idling.
   bool busy() const { return current_ != nullptr && current_->busy(); }
 
+  // Pass-throughs to the open app (see App).
+  bool takeAppActivity() { return current_ != nullptr && current_->takeActivity(); }
+  uint32_t takeSleepRequest() { return current_ != nullptr ? current_->takeSleepRequest() : 0; }
+  App* currentApp() const { return current_; }
+
   // Mark the screen dirty. `clean` asks for a half refresh.
   void invalidate(bool clean = false);
 
@@ -46,7 +53,7 @@ class Shell {
   void drawHome(const layout::Rect& area);
   void drawCardStack(int depth, int slide) const;
   void drawGutter() const;
-  void drawPausedBadge() const;
+  void drawBadge(Badge badge) const;
   void drawScreen(int slide = 0);
   void drawSlideFrame(int left);
   void redraw(bool clean);
@@ -58,8 +65,10 @@ class Shell {
   int appCount_ = 0;
   App* current_ = nullptr;  // nullptr: home
   int selected_ = 0;        // home row
+  int homeScroll_ = 0;      // pixels the home page is scrolled up
   bool chrome_ = true;
   int fastSinceClean_ = 0;
+  bool forceClean_ = false;  // the panel doesn't match the framebuffer
   bool dirty_ = false;
   bool dirtyClean_ = false;
   int shownMinute_ = -1;  // minute of day on screen, -1 when the clock isn't set

@@ -1,5 +1,9 @@
 #include "Widgets.h"
 
+#include <Bitmap.h>
+#include <HalStorage.h>
+#include <Logging.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -33,6 +37,13 @@ constexpr const char* kSlidersIcon[kIconH] = {
     ".##...###########.", "..##.##...........", "...###............", "..................",
 };
 
+constexpr const char* kBluetoothIcon[kIconH] = {
+    "........##........", "........###.......", "........####......", "........#####.....",
+    "....##..##.###....", "....###.##.##.....", "......######......", ".......####.......",
+    ".......####.......", "......######......", "....###.#####.....", "....##..##.###....",
+    "........##.##.....", "........####......", "........###.......", "........##........",
+};
+
 int contentLeft(const layout::Rect& area) { return area.x + layout::kMarginLeft; }
 int contentRight(const layout::Rect& area) { return area.x + area.w - kRightMargin; }
 
@@ -46,13 +57,44 @@ int capHeight(const GfxRenderer& r, const int font) {
 }  // namespace
 
 void drawIcon(GfxRenderer& r, const Icon icon, const int x, const int y, const bool black) {
-  const char* const* rows = icon == Icon::Image ? kImageIcon : icon == Icon::Sliders ? kSlidersIcon : nullptr;
-  if (rows == nullptr) return;
+  const char* const* rows = nullptr;
+  switch (icon) {
+    case Icon::Image:
+      rows = kImageIcon;
+      break;
+    case Icon::Sliders:
+      rows = kSlidersIcon;
+      break;
+    case Icon::Bluetooth:
+      rows = kBluetoothIcon;
+      break;
+    case Icon::None:
+      return;
+  }
   for (int dy = 0; dy < kIconH; dy++) {
     for (int dx = 0; rows[dy][dx] != '\0'; dx++) {
       if (rows[dy][dx] == '#') r.drawPixel(x + dx, y + dy, black);
     }
   }
+}
+
+int imageOrigin(const int size, const int avail) { return size > avail ? 0 : (avail - size) / 2; }
+
+bool drawBitmapFile(GfxRenderer& r, const char* path, const layout::Rect& area) {
+  HalFile file;
+  if (!Storage.openFileForRead("IMG", path, file)) return false;
+  Bitmap bitmap(file, true);
+  bool drawn = false;
+  const auto err = bitmap.parseHeaders();
+  if (err == BmpReaderError::Ok) {
+    const int x = area.x + imageOrigin(bitmap.getWidth(), area.w);
+    const int y = area.y + imageOrigin(bitmap.getHeight(), area.h);
+    drawn = r.drawBitmap(bitmap, x, y, 0, 0);  // no max size: no scaling
+  } else {
+    LOG_ERR("IMG", "%s: %s", path, Bitmap::errorToString(err));
+  }
+  file.close();
+  return drawn;
 }
 
 void drawTextAt(GfxRenderer& r, const int font, const int x, const int baseline, const char* text, const bool black,

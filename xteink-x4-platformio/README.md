@@ -51,11 +51,13 @@ current page on screen with the chrome hidden and a ❚❚ badge in the bottom-r
 corner. Power wakes it, back to home.
 
 Navigation: **Home** shows the date, a large clock (from the X4C's BM8563 RTC)
-and a row per app; Up/Down move between rows and Select opens one. **Images**
-opens straight onto the first BMP in `/images`, filling the card, and Up/Down
-step through them. **Settings** lists Refresh, Sleep after, Clock, Storage and
-About with their current values. Select opens a setting's page, where Up/Down
-change the value (saved to flash straight away) and Select or Back returns.
+and a list of apps (two rows show at a time; it scrolls); Up/Down move between
+rows and Select opens one. **Images** opens straight onto the first BMP in
+`/images`, filling the card, and Up/Down step through them. **Bluetooth** is a
+remote screen: see [Bluetooth](#bluetooth). **Settings** lists Refresh, Sleep
+after, Clock, Frame sleep, Storage and About with their current values. Select
+opens a setting's page, where Up/Down change the value (saved to flash straight
+away) and Select or Back returns.
 
 The mapping lives only in [`src/shell/Input.cpp`](src/shell/Input.cpp). If the
 screen comes up upside down, change `kOrientation` in
@@ -151,7 +153,10 @@ src/
     Widgets.*         pills, rows, ListView, InfoView, icons
   apps/
     ImageApp.*        /images viewer, one BMP per page
+    BleApp.*          Bluetooth remote screen
     SettingsApp.*     settings list, choice pages, About
+  ble/
+    CastServer.*      BLE GATT server for the cast protocol
   Settings.*          persisted settings (NVS) and their options
 fonts/                IBM Plex Mono TTFs (OFL); scripts/fonts.sh turns them into headers
 docs/design/          visual spec and mockups
@@ -161,6 +166,28 @@ freeink-sdk/          hardware SDK (git submodule)
 
 To add an app, subclass `App`, then `shell.addApp(&myApp)` in `main.cpp`.
 
+## Bluetooth
+
+The **Bluetooth** app receives frames over Bluetooth LE and shows them, like a
+remote screen. While it's open the device advertises as `X4-XXXX`; leaving it
+turns the radio off. It shows the last frame received (after a restart, the
+last one saved), or "Listening". The title pill shows the link status:
+Listening, Connected, Receiving, "Next in N s" (the sender's interval), or
+Transfer failed; a Bluetooth badge in the corner marks a frame as live.
+
+- Send from a browser with [`ble-cast`](../ble-cast/) (Chrome/Edge, Web
+  Bluetooth): images, slideshows, or a live capture of a web page.
+- Frames are 1-bit at the device's frame area (716 × 480, or 800 × 480 with
+  chrome hidden) and are drawn at native size, like Images.
+- Frames are saved to `/images` as BMPs unless the sender turns `persist` off.
+- **Settings → Frame sleep** (off by default): when a sender says when its next
+  frame is due, the X4 Classic deep-sleeps until just before it, frame left on
+  screen, then wakes back into the Bluetooth app. Gaps under 30 s don't sleep.
+  The original X4 can't wake on a timer, so it stays awake.
+
+Wire format: [docs/ble-cast-protocol.md](docs/ble-cast-protocol.md). The
+receiver is `src/ble/CastServer.*` (NimBLE) and `src/apps/BleApp.*`.
+
 ## Status / next
 
 - [x] Landscape shell, key mapping
@@ -169,6 +196,7 @@ To add an app, subclass `App`, then `shell.addApp(&myApp)` in `main.cpp`.
 - [x] Serial screenshot tool
 - [x] BMP image viewer
 - [x] Settings: refresh interval, sleep timer, 12/24h clock, storage, About
+- [x] Bluetooth remote screen ([ble-cast](../ble-cast/)), sleep between frames
 - [ ] Wi-Fi: scan, join, save credentials (start with `/wifi.txt` on SD)
 - [x] Persist settings
 - [ ] Persist last app

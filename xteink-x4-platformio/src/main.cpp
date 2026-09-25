@@ -11,9 +11,11 @@
 #include <Logging.h>
 #include <Rtc.h>
 #include <XteinkDetect.h>
+#include <esp_sleep.h>
 
 #include "Fonts.h"
 #include "Settings.h"
+#include "apps/BleApp.h"
 #include "apps/ImageApp.h"
 #include "apps/SettingsApp.h"
 #include "shell/Input.h"
@@ -31,7 +33,12 @@ Rtc rtc;
 Shell shell(renderer, rtc);
 
 ImageApp imageApp;
+BleApp bleApp;
 SettingsApp settingsApp;
+
+// Set before a timed sleep between Bluetooth frames; survives deep sleep so the
+// timer wake goes straight back into the Bluetooth app.
+RTC_DATA_ATTR bool resumeBleApp = false;
 
 unsigned long lastActivityMs = 0;
 // The hold that woke the device must be released before a new hold can sleep it.
@@ -48,6 +55,19 @@ void enterDeepSleep(const bool paused) {
     renderer.drawCenteredText(fonts::MEDIUM_22, layout::kScreenH / 2 - 20, "Sleeping");
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   }
+  resumeBleApp = false;
+  display.deepSleep();
+  Storage.prepareForDeepSleep();
+  powerManager.startDeepSleep(gpio);
+}
+
+// Sleep between Bluetooth frames: the frame stays on the panel, and the timer
+// (or Power) wakes the device; a timer wake resumes the Bluetooth app.
+void enterTimedSleep(const uint32_t seconds) {
+  LOG_INF("MAIN", "Sleeping %u s until the next frame", static_cast<unsigned>(seconds));
+  if (App* app = shell.currentApp()) app->onClose();  // radio off
+  resumeBleApp = true;
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(seconds) * 1000000ULL);
   display.deepSleep();
   Storage.prepareForDeepSleep();
   powerManager.startDeepSleep(gpio);
@@ -97,8 +117,11 @@ void setup() {
   settings::begin();
 
   shell.addApp(&imageApp);
+  shell.addApp(&bleApp);
   shell.addApp(&settingsApp);
-  shell.begin();
+  const bool timerWake = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+  shell.begin(timerWake && resumeBleApp ? &bleApp : nullptr);
+  resumeBleApp = false;
   // From here on buttons are sampled on a background task (see Input.h).
   input::begin();
 
@@ -188,6 +211,7 @@ void loop() {
   for (Action action = input::next(anyPress); action != Action::None; action = input::next(anyPress)) {
     shell.dispatch(action);
   }
+  if (shell.takeAppActivity()) anyPress = true;  // e.g. a Bluetooth frame
   if (anyPress) {
     lastActivityMs = millis();
     powerManager.setPowerSaving(false);
@@ -203,6 +227,8 @@ void loop() {
 
   shell.tick();
   shell.flush();
+  // After the frame is on the panel: an app may ask to sleep until it's needed.
+  if (const uint32_t seconds = shell.takeSleepRequest()) enterTimedSleep(seconds);
 
   // Input no longer depends on this loop's cadence, so idling slower is safe,
   // unless the shell has background work to get through.

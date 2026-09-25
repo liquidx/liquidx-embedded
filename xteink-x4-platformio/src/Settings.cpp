@@ -23,9 +23,13 @@ constexpr Option kClockOptions[] = {
     {24, "24", "hour", "24h"},
     {12, "12", "hour", "12h"},
 };
+constexpr Option kOnOffOptions[] = {
+    {0, "Off", "", "Off"},
+    {1, "On", "", "On"},
+};
 
-constexpr int kMaxChoices = 3;
-const Choice* const kAll[kMaxChoices] = {&kRefresh, &kSleep, &kClock};
+constexpr int kMaxChoices = 4;
+const Choice* const kAll[kMaxChoices] = {&kRefresh, &kSleep, &kClock, &kFrameSleep};
 uint8_t indices[kMaxChoices];
 
 Preferences prefs;
@@ -54,6 +58,13 @@ const Choice kSleep{"sleep",
                     5,
                     2};
 const Choice kClock{"clock", "Clock", "Clock shows", "How the home screen shows the time.", kClockOptions, 2, 0};
+const Choice kFrameSleep{"framesleep",
+                         "Frame sleep",
+                         "Sleep between frames",
+                         "When a Bluetooth sender says when its next frame is due, sleep until just before it.",
+                         kOnOffOptions,
+                         2,
+                         0};
 
 void begin() {
   prefs.begin("shell", false);

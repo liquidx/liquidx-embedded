@@ -1,8 +1,6 @@
 #include "ImageApp.h"
 
-#include <Bitmap.h>
 #include <HalStorage.h>
-#include <Logging.h>
 #include <strings.h>
 
 #include <algorithm>
@@ -36,22 +34,11 @@ void drawMessage(GfxRenderer& r, const layout::Rect& area, const bool chrome, co
   }
 }
 
-// Where an image of `size` starts along an axis of `avail` pixels: centred
-// when it fits, otherwise pinned to the start and cropped by the clip rect.
-int imageOrigin(const int size, const int avail) { return size > avail ? 0 : (avail - size) / 2; }
-
-// Draw the bitmap at its native resolution; never scaled.
-bool drawNative(GfxRenderer& r, const Bitmap& bitmap, const layout::Rect& area) {
-  const int x = area.x + imageOrigin(bitmap.getWidth(), area.w);
-  const int y = area.y + imageOrigin(bitmap.getHeight(), area.h);
-  return r.drawBitmap(bitmap, x, y, 0, 0);  // no max size: no scaling
-}
-
 }  // namespace
 
 int ImageApp::itemCount() {
   // Home asks before the app is ever opened; scan once, then onOpen refreshes it.
-  if (!scanned_) scan();
+  if (!scanned_ || stale_) scan();
   return Storage.ready() ? static_cast<int>(files_.size()) : -1;
 }
 
@@ -63,6 +50,7 @@ void ImageApp::onOpen() {
 
 void ImageApp::scan() {
   scanned_ = true;
+  stale_ = false;
   files_.clear();
   if (!Storage.ready()) return;
 
@@ -92,19 +80,7 @@ void ImageApp::render(GfxRenderer& r, const layout::Rect& area, const bool chrom
   }
 
   const std::string path = std::string(kDir) + "/" + files_[index_];
-  HalFile file;
-  bool drawn = false;
-  if (Storage.openFileForRead("IMG", path.c_str(), file)) {
-    Bitmap bitmap(file, true);
-    const auto err = bitmap.parseHeaders();
-    if (err == BmpReaderError::Ok) {
-      drawn = drawNative(r, bitmap, area);
-    } else {
-      LOG_ERR("IMG", "%s: %s", path.c_str(), Bitmap::errorToString(err));
-    }
-    file.close();
-  }
-  if (!drawn) drawMessage(r, area, chrome, "Can't show image", files_[index_].c_str());
+  if (!ui::drawBitmapFile(r, path.c_str(), area)) drawMessage(r, area, chrome, "Can't show image", files_[index_].c_str());
 
   if (chrome) {
     const int countY = area.y + area.h - kPillBottom - ui::kPillH;
