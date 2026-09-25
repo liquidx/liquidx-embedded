@@ -203,3 +203,13 @@ test('end to end: a region the display has no base for is resent as a full frame
   c[20 * 8] = 0x80;
   assert.deepEqual((await blit.sendFrame(c, { width: 64, height: 32, regions: true })).region, { x: 0, y: 20, width: 8, height: 1 });
 });
+
+test('disconnect() forgets the display: later sends do not reconnect', async () => {
+  const { display, blit } = await connected({ width: 64, height: 32 });
+  blit.disconnect();
+  assert.equal(display.connected, false);
+  assert.equal(blit.caps, null);
+  assert.equal(blit.deviceName, null);
+  await assert.rejects(blit.sendFrame(frame(FORMAT.MONO1, 64, 32), { width: 64, height: 32 }), /No display/);
+  assert.equal(display.connected, false);
+});

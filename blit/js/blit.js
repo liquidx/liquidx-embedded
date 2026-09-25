@@ -9,7 +9,7 @@
 //   await blit.sendElement(document.querySelector('#screen'));
 //   blit.addEventListener('key', (e) => console.log(e.detail.name, e.detail.action));
 //
-// Events (EventTarget): 'connected' (detail: caps), 'disconnected', 'caps'
+// Events (EventTarget): 'connected' (detail: caps), 'disconnected', 'reconnecting', 'caps'
 // (detail: caps), 'key' ({ key, name, action }), 'pointer' ({ action, x, y }),
 // 'power' ({ percent, charging, external }), 'progress' ({ sent, total }),
 // 'status' ({ event, code, value }).
@@ -164,6 +164,7 @@ export class Blit extends EventTarget {
   /** Reconnect to the display picked earlier, retrying while it's asleep or out of range. */
   async reconnect({ timeoutMs = 30000, retryMs = 1500 } = {}) {
     if (!this.#transport) throw new Error('No display: call connect() first');
+    this.dispatchEvent(new Event('reconnecting'));
     const deadline = performance.now() + timeoutMs;
     for (;;) {
       try {
@@ -176,8 +177,18 @@ export class Blit extends EventTarget {
     }
   }
 
+  /**
+   * Disconnect and forget the display: nothing reconnects until connect() or
+   * connectTransport() is called again. (A link the display drops on its own,
+   * e.g. to sleep between frames, keeps the display, and the next send
+   * reconnects.)
+   */
   disconnect() {
-    this.#transport?.close();
+    const transport = this.#transport;
+    this.#transport = null;
+    this.caps = null;
+    this.#last = null;
+    transport?.close();
   }
 
   /** Read caps fresh from Info. */

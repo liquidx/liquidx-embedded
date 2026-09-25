@@ -356,6 +356,7 @@ blit.addEventListener('connected', (e) => {
   tick('connect');
 });
 
+blit.addEventListener('reconnecting', () => log(`Reconnecting to ${blit.deviceName ?? 'the display'} to send…`));
 blit.addEventListener('disconnected', () => {
   log('Display disconnected');
   updateMeta();
@@ -386,7 +387,12 @@ $('connect').addEventListener('click', async () => {
     if (!isChooserCancelled(err)) log(`${err.name}: ${err.message}`, 'err');
   }
 });
-$('disconnect').addEventListener('click', () => blit.disconnect());
+$('disconnect').addEventListener('click', () => {
+  blit.disconnect();
+  log('Disconnected. Press Connect display to connect again.');
+  updateMeta();
+  publish();
+});
 $('sendNow').addEventListener('click', () => tick('manual'));
 $('pause').addEventListener('click', () => {
   paused = !paused;
