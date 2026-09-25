@@ -20,6 +20,13 @@ constexpr int kRowsVisible = 2;
 
 constexpr unsigned long kClockPollMs = 1000;
 
+// Card transitions are one extra frame with the top card shifted left:
+// on Back, the leaving card, as if sliding away to the left;
+// on entering a page, the new card short of its place, as if arriving from
+// the left and finishing its last few pixels.
+constexpr int kSlideOutPx = 10;
+constexpr int kSlideInPx = 20;
+
 const char* const kWeekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 const char* const kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
@@ -83,6 +90,7 @@ void Shell::dispatch(const Action action) {
         if (appCount_ > 0) {
           current_ = apps_[selected_];
           current_->onOpen();
+          drawSlideFrame(kSlideInPx);
           invalidate();
         }
         break;
@@ -92,19 +100,33 @@ void Shell::dispatch(const Action action) {
     return;
   }
 
+  if (action == Action::Back) drawSlideFrame(kSlideOutPx);
+
   if (action == Action::Back && current_->depth() == 0) {
     current_ = nullptr;
     invalidate();
     return;
   }
 
+  const int before = depth();
   const Result result = current_->handle(action);
-  if (result != Result::Ignored) invalidate(result == Result::CleanRedraw);
+  if (result == Result::Ignored) return;
+  if (depth() > before) drawSlideFrame(kSlideInPx);
+  invalidate(result == Result::CleanRedraw);
 }
 
 int Shell::depth() const {
   if (current_ == nullptr) return 0;
   return std::min(layout::kMaxDepth, 1 + current_->depth());
+}
+
+// Show the current state with the top card `left` pixels left of its place.
+// The caller then invalidates, so the next flush draws it in place.
+void Shell::drawSlideFrame(const int left) {
+  // Only with chrome: without it there is no card edge to move.
+  if (!chrome_) return;
+  drawScreen(left);
+  present(false);
 }
 
 void Shell::showPaused() {
@@ -119,10 +141,13 @@ void Shell::redraw(const bool clean) {
   present(clean);
 }
 
-void Shell::drawScreen() {
+// `slide` shifts the top card (content and edge) left by that many pixels.
+void Shell::drawScreen(const int slide) {
   renderer_.clearScreen();
-  const auto area = chrome_ ? layout::cardArea(depth()) : layout::kFullScreen;
-  renderer_.setClipRect(area.x, area.y, area.w, area.h);
+  auto area = chrome_ ? layout::cardArea(depth()) : layout::kFullScreen;
+  area.x -= slide;
+  const int clipX = std::max(0, area.x);  // pixels left of the panel aren't drawable
+  renderer_.setClipRect(clipX, area.y, area.x + area.w - clipX, area.h);
   if (current_ == nullptr) {
     drawHome(area);
   } else {
@@ -130,7 +155,7 @@ void Shell::drawScreen() {
   }
   renderer_.setClipRect(0, 0, layout::kScreenW, layout::kScreenH);
   if (chrome_) {
-    drawCardStack(depth());
+    drawCardStack(depth(), slide);
     drawGutter();
   }
 }
@@ -172,16 +197,17 @@ void Shell::drawHome(const layout::Rect& area) {
   }
 }
 
-void Shell::drawCardStack(const int depth) const {
+void Shell::drawCardStack(const int depth, const int slide) const {
   // Cards bleed off the top, bottom and left, so only the right corners show.
   constexpr int R = layout::kCardRadius;
   constexpr int kBleed = R + 2;
+  const int topW = layout::cardWidth(depth) - slide;
   // Square off whatever the top page drew outside its rounded corners...
-  renderer_.maskRoundedRectOutsideCorners(-kBleed, -1, layout::cardWidth(depth) + kBleed, layout::kScreenH + 2, R,
-                                          Color::White);
+  renderer_.maskRoundedRectOutsideCorners(-kBleed, -1, topW + kBleed, layout::kScreenH + 2, R, Color::White);
   // ...then outline every card in the stack; lower ones peek out to the right.
   for (int d = 0; d <= depth; d++) {
-    renderer_.drawRoundedRect(-kBleed, -1, layout::cardWidth(d) + kBleed, layout::kScreenH + 2, 1, R, true);
+    const int w = d == depth ? topW : layout::cardWidth(d);
+    renderer_.drawRoundedRect(-kBleed, -1, w + kBleed, layout::kScreenH + 2, 1, R, true);
   }
 }
 

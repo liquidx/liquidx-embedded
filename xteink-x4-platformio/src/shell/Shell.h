@@ -39,10 +39,11 @@ class Shell {
   int depth() const;
   int clockMinute() const;
   void drawHome(const layout::Rect& area);
-  void drawCardStack(int depth) const;
+  void drawCardStack(int depth, int slide) const;
   void drawGutter() const;
   void drawPausedBadge() const;
-  void drawScreen();
+  void drawScreen(int slide = 0);
+  void drawSlideFrame(int left);
   void redraw(bool clean);
   void present(bool clean);
 
