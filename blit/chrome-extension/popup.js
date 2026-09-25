@@ -128,17 +128,26 @@ $('start').addEventListener('click', async () => {
   await saveConfig(tab.id, config);
   session = await findSession(tab.id);
   if (session) {
-    await chrome.windows.update(session.windowId, { focused: true });
+    await showSession();
   } else {
-    await chrome.windows.create({ url: sessionUrl(tab.id), type: 'popup', width: 460, height: 780 });
+    // A normal window, not type 'popup': Chrome anchors the Bluetooth chooser
+    // to the address bar, and in a window without one requestDevice() fails
+    // at once with "User cancelled the requestDevice() chooser".
+    await chrome.windows.create({ url: sessionUrl(tab.id), type: 'normal', width: 460, height: 860 });
   }
   window.close();
 });
 $('sendNow').addEventListener('click', () => command('send'));
 $('show').addEventListener('click', async () => {
-  if (session) await chrome.windows.update(session.windowId, { focused: true });
+  if (session) await showSession();
   window.close();
 });
+
+// Bring the session to the front: its window, and its tab within it.
+async function showSession() {
+  await chrome.windows.update(session.windowId, { focused: true });
+  if (session.tabId != null) await chrome.tabs.update(session.tabId, { active: true });
+}
 $('stop').addEventListener('click', async () => {
   await command('stop').catch(() => {});
   session = null;

@@ -146,7 +146,9 @@ Why a session window rather than the popup or a service worker? The popup
 closes as soon as it loses focus, and Chrome's Bluetooth chooser takes the
 focus. MV3 service workers have no Web Bluetooth and no media capture, and
 get stopped when idle. A small extension window can hold the connection and
-the capture stream for as long as needed.
+the capture stream for as long as needed. It's a normal window, with an
+address bar: Chrome anchors the Bluetooth chooser there, and in a `popup`
+type window `requestDevice()` fails straight away as if cancelled.
 
 Per frame, the session:
 

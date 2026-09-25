@@ -39,6 +39,15 @@ export class BlitError extends Error {
   }
 }
 
+/**
+ * True if `err` from requesting a device only means the user closed the
+ * chooser. Chrome also uses NotFoundError for real failures (no adapter,
+ * Bluetooth blocked for the site), and those should be shown.
+ */
+export function isChooserCancelled(err) {
+  return err?.name === 'NotFoundError' && /cancel/i.test(err.message);
+}
+
 /** Transport over Web Bluetooth GATT (Chrome / Edge, secure contexts). */
 export class WebBluetoothTransport {
   #chars = null;

@@ -1,5 +1,5 @@
 // Example: embed blit in a webapp and blit one of its elements.
-import { Blit } from '../../../js/blit.js';
+import { Blit, isChooserCancelled } from '../../../js/blit.js';
 
 const $ = (id) => document.getElementById(id);
 const screen = $('screen');
@@ -72,7 +72,7 @@ $('connect').addEventListener('click', async () => {
   try {
     await cast.connect();
   } catch (err) {
-    if (err.name !== 'NotFoundError') status(err.message, 'err');
+    if (!isChooserCancelled(err)) status(`${err.name}: ${err.message}`, 'err');
   }
 });
 

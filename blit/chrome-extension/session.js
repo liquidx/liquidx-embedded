@@ -2,7 +2,7 @@
 // display connection (Web Bluetooth needs a page that stays open), captures
 // the tab, renders the chosen region for the display and sends it on the
 // chosen schedule, and replays the display's buttons and taps on the page.
-import { Blit, FORMAT_INFO, WebBluetoothTransport, fitRect, rasterize, sourceSize } from './lib/blit.js';
+import { Blit, FORMAT_INFO, WebBluetoothTransport, fitRect, isChooserCancelled, rasterize, sourceSize } from './lib/blit.js';
 import { SimDisplay, SimTransport } from './lib/sim-display.js';
 import { WHOLE_TAB, describeRegion, ensureContent, key, loadConfig, loadRegion } from './config.js';
 
@@ -382,7 +382,8 @@ $('connect').addEventListener('click', async () => {
   try {
     await connectDevice(await WebBluetoothTransport.request());
   } catch (err) {
-    if (err.name !== 'NotFoundError') log(err.message, 'err'); // NotFoundError: chooser cancelled
+    console.error(err);
+    if (!isChooserCancelled(err)) log(`${err.name}: ${err.message}`, 'err');
   }
 });
 $('disconnect').addEventListener('click', () => blit.disconnect());

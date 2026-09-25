@@ -1,6 +1,6 @@
 // Demo page for ../js/blit.js: send images, or run a slideshow, to a display
 // over Web Bluetooth or to a simulated display in the page.
-import { Blit, FORMAT, FORMAT_INFO, KEY, rasterize } from '../js/blit.js';
+import { Blit, FORMAT, FORMAT_INFO, KEY, isChooserCancelled, rasterize } from '../js/blit.js';
 import { SimDisplay, SimTransport } from '../js/sim-display.js';
 
 const DEFAULT_AREA = { w: 716, h: 480 }; // before a display reports its own
@@ -124,7 +124,7 @@ $('connect').addEventListener('click', async () => {
   try {
     await cast.connect();
   } catch (err) {
-    if (err.name !== 'NotFoundError') log(err.message, 'err'); // NotFoundError: chooser cancelled
+    if (!isChooserCancelled(err)) log(`${err.name}: ${err.message}`, 'err');
   }
 });
 $('disconnect').addEventListener('click', () => cast.disconnect());
