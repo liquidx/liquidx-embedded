@@ -24,4 +24,11 @@ void begin();
 // was popped, for inactivity tracking.
 Action next(bool& anyPress);
 
+// Front key slot (0 = top .. 3 = bottom, as layout::kKeySlots) an action's key
+// sits in, or -1 for actions with no front key.
+int keySlot(Action action);
+
+// Front keys held down right now, one bit per key slot (bit 0 = top).
+uint8_t heldKeys();
+
 }  // namespace input

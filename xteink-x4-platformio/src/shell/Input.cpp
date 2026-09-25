@@ -39,4 +39,28 @@ Action next(bool& anyPress) {
   return Action::None;
 }
 
+int keySlot(const Action action) {
+  switch (action) {
+    case Action::Back:
+      return 0;
+    case Action::Select:
+      return 1;
+    case Action::Up:
+      return 2;
+    case Action::Down:
+      return 3;
+    default:
+      return -1;
+  }
+}
+
+uint8_t heldKeys() {
+  uint8_t mask = 0;
+  for (const auto& b : kBindings) {
+    const int slot = keySlot(b.action);
+    if (slot >= 0 && gpio.isPressed(b.button)) mask |= 1 << slot;
+  }
+  return mask;
+}
+
 }  // namespace input

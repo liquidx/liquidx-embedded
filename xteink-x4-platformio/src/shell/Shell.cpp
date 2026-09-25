@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <iterator>
 
 #include "../Fonts.h"
 #include "../Settings.h"
@@ -20,12 +22,39 @@ constexpr int kRowsVisible = 2;
 
 constexpr unsigned long kClockPollMs = 1000;
 
-// Card transitions are one extra frame with the top card shifted left:
-// on Back, the leaving card, as if sliding away to the left;
-// on entering a page, the new card short of its place, as if arriving from
-// the left and finishing its last few pixels.
-constexpr int kSlideOutPx = 10;
-constexpr int kSlideInPx = 20;
+// Card transitions are extra frames with the top card shifted left by each
+// offset in turn: on entering a page, the new card arriving from the left and
+// easing into place; on Back, the leaving card, as if sliding away to the left.
+// Each frame costs one fast refresh, but no re-render (see Shell::shiftCard).
+constexpr int kSlideIn[] = {64, 16};
+constexpr int kSlideOut[] = {10};
+
+constexpr int maxSlide() {
+  int m = 0;
+  for (const int px : kSlideIn) m = std::max(m, px);
+  for (const int px : kSlideOut) m = std::max(m, px);
+  return m;
+}
+
+// Frames are shifted in the framebuffer, where logical x is panel x (1 bit a
+// pixel, MSB first). The card zone left of the gutter is whole bytes, and each
+// row's leftmost pixels are kept aside so later frames can shift back right.
+constexpr bool kPanelNative = layout::kOrientation == GfxRenderer::LandscapeCounterClockwise;
+static_assert(layout::kGutterX % 8 == 0);
+constexpr int kCardBytes = layout::kGutterX / 8;
+constexpr int kSavedBytes = (maxSlide() + 7) / 8;
+uint8_t savedLeft[layout::kScreenH][kSavedBytes];
+
+// dst pixel x = src pixel x + shift over an n-byte row; pixels from outside the
+// row are white. dst and src must not overlap.
+void shiftRow(uint8_t* dst, const uint8_t* src, const int n, const int shift) {
+  const int q = shift >> 3;  // floor, for negative shifts too
+  const int r = shift & 7;
+  const auto at = [&](const int i) -> unsigned { return i >= 0 && i < n ? src[i] : 0xFF; };
+  for (int i = 0; i < n; i++) {
+    dst[i] = static_cast<uint8_t>((at(i + q) << r) | (at(i + q + 1) >> (8 - r)));
+  }
+}
 
 const char* const kWeekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 const char* const kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
@@ -47,7 +76,12 @@ void Shell::invalidate(const bool clean) {
 }
 
 bool Shell::flush() {
-  if (!dirty_) return false;
+  if (!dirty_) {
+    // The framebuffer still holds what's on the panel: touch up the gutter.
+    if (!chrome_ || litKeys() == keysShown_) return false;
+    redrawKeys();
+    return true;
+  }
   const bool clean = dirtyClean_;
   dirty_ = dirtyClean_ = false;
   redraw(clean);
@@ -76,6 +110,10 @@ void Shell::tick() {
 void Shell::dispatch(const Action action) {
   if (action == Action::None) return;
 
+  // Show the key pressed on the next frame, even if it's released by then.
+  const int key = input::keySlot(action);
+  if (chrome_ && key >= 0) keysFlash_ |= 1 << key;
+
   if (action == Action::ToggleChrome) {
     chrome_ = !chrome_;
     invalidate();
@@ -95,8 +133,7 @@ void Shell::dispatch(const Action action) {
         if (appCount_ > 0) {
           current_ = apps_[selected_];
           current_->onOpen();
-          drawSlideFrame(kSlideInPx);
-          invalidate();
+          slide(kSlideIn, std::size(kSlideIn), true);
         }
         break;
       default:
@@ -105,7 +142,7 @@ void Shell::dispatch(const Action action) {
     return;
   }
 
-  if (action == Action::Back) drawSlideFrame(kSlideOutPx);
+  if (action == Action::Back) slide(kSlideOut, std::size(kSlideOut), false);
 
   if (action == Action::Back && current_->depth() == 0) {
     current_ = nullptr;
@@ -116,8 +153,11 @@ void Shell::dispatch(const Action action) {
   const int before = depth();
   const Result result = current_->handle(action);
   if (result == Result::Ignored) return;
-  if (depth() > before) drawSlideFrame(kSlideInPx);
-  invalidate(result == Result::CleanRedraw);
+  if (depth() > before) {
+    slide(kSlideIn, std::size(kSlideIn), true, result == Result::CleanRedraw);
+  } else {
+    invalidate(result == Result::CleanRedraw);
+  }
 }
 
 int Shell::depth() const {
@@ -125,13 +165,65 @@ int Shell::depth() const {
   return std::min(layout::kMaxDepth, 1 + current_->depth());
 }
 
-// Show the current state with the top card `left` pixels left of its place.
-// The caller then invalidates, so the next flush draws it in place.
-void Shell::drawSlideFrame(const int left) {
+uint8_t Shell::litKeys() const { return input::heldKeys() | keysFlash_; }
+
+// Show the current state with the top card shifted left by each of `offsets`
+// in turn. With `settle`, then show it in place as a resting page (a half
+// refresh if `clean`); otherwise the caller changes state and invalidates.
+void Shell::slide(const int* offsets, const int count, const bool settle, const bool clean) {
   // Only with chrome: without it there is no card edge to move.
-  if (!chrome_) return;
-  drawScreen(left);
-  present(false);
+  if (!chrome_) {
+    if (settle) invalidate(clean);
+    return;
+  }
+  uint8_t* fb = renderer_.getFrameBuffer();
+  if (!kPanelNative || fb == nullptr) {
+    for (int i = 0; i < count; i++) {
+      drawScreen(offsets[i]);
+      present(Refresh::Frame);
+    }
+    if (settle) invalidate(clean);
+    return;
+  }
+
+  // Render the page in place once, unless it's already what's on the panel.
+  if (settle || dirty_) drawScreen();
+  const int stride = renderer_.getDisplayWidthBytes();
+  for (int y = 0; y < layout::kScreenH; y++) memcpy(savedLeft[y], fb + y * stride, kSavedBytes);
+
+  int shown = 0;
+  for (int i = 0; i < count; i++) {
+    shiftCard(shown, offsets[i]);
+    shown = offsets[i];
+    present(Refresh::Frame);
+  }
+  if (!settle) return;
+
+  shiftCard(shown, 0);
+  const bool half = clean || dirtyClean_;
+  dirty_ = dirtyClean_ = false;
+  present(half ? Refresh::Clean : Refresh::Page);
+}
+
+// The framebuffer holds the page with the top card `from` pixels left of its
+// place, and savedLeft its left edge in place. Redraw it `to` pixels left, the
+// same as drawScreen(to) but without rendering the page again.
+void Shell::shiftCard(const int from, const int to) {
+  uint8_t* fb = renderer_.getFrameBuffer();
+  const int stride = renderer_.getDisplayWidthBytes();
+  uint8_t page[kCardBytes];
+  for (int y = 0; y < layout::kScreenH; y++) {
+    uint8_t* row = fb + y * stride;
+    shiftRow(page, row, kCardBytes, -from);  // back in place...
+    memcpy(page, savedLeft[y], kSavedBytes);  // ...with the left edge `from` lost
+    shiftRow(row, page, kCardBytes, to);
+  }
+  // Clear what the shift dragged in (lower card edges, the old right edge),
+  // then redraw the stack and gutter where they belong.
+  const int right = layout::cardWidth(depth()) - to;
+  renderer_.fillRect(right, 0, layout::kScreenW - right, layout::kScreenH, false);
+  drawCardStack(depth(), to);
+  drawGutter();
 }
 
 void Shell::showPaused() {
@@ -143,7 +235,14 @@ void Shell::showPaused() {
 
 void Shell::redraw(const bool clean) {
   drawScreen();
-  present(clean);
+  present(clean ? Refresh::Clean : Refresh::Page);
+}
+
+// Only the pressed keys changed: repaint the gutter over the last frame.
+void Shell::redrawKeys() {
+  renderer_.fillRect(layout::kGutterX, 0, layout::kGutterW, layout::kScreenH, false);
+  drawGutter();
+  present(Refresh::Frame);
 }
 
 // `slide` shifts the top card (content and edge) left by that many pixels.
@@ -216,7 +315,7 @@ void Shell::drawCardStack(const int depth, const int slide) const {
   }
 }
 
-void Shell::drawGutter() const {
+void Shell::drawGutter() {
   // Battery gauge above the first key.
   constexpr int kBattX = 751, kBattY = 24, kBattW = 26, kBattH = 14;
   renderer_.drawRoundedRect(kBattX, kBattY, kBattW, kBattH, 1, 2, true);
@@ -224,34 +323,43 @@ void Shell::drawGutter() const {
   const int level = std::clamp<int>(powerManager.getBatteryPercentage(), 0, 100);
   renderer_.fillRect(kBattX + 3, kBattY + 3, (kBattW - 6) * level / 100, kBattH - 6);
 
-  // All four keys are always shown, even when inert on this page.
+  // All four keys are always shown, even when inert on this page. A key held
+  // down (or pressed since the last frame) shows inverted: an outlined white
+  // button with a black glyph.
+  const uint8_t lit = litKeys();
+  keysShown_ = lit;
   constexpr int R = layout::kKeyRadius;
   const int cx = layout::kKeyCenterX;
   for (int i = 0; i < layout::kKeyCount; i++) {
     const auto& slot = layout::kKeySlots[i];
     const int cy = slot.y + slot.h / 2;
-    renderer_.fillRoundedRect(cx - R, cy - R, R * 2, R * 2, R, Color::Black);
+    const bool inverted = lit & (1 << i);
+    if (inverted) {
+      renderer_.drawRoundedRect(cx - R, cy - R, R * 2, R * 2, 2, R, true);
+    } else {
+      renderer_.fillRoundedRect(cx - R, cy - R, R * 2, R * 2, R, Color::Black);
+    }
 
     switch (i) {
       case 0: {  // ◀ back
         const int xs[] = {cx + 5, cx + 5, cx - 5};
         const int ys[] = {cy - 5, cy + 6, cy};
-        renderer_.fillPolygon(xs, ys, 3, false);
+        renderer_.fillPolygon(xs, ys, 3, inverted);
         break;
       }
       case 1:  // ● select
-        renderer_.fillRoundedRect(cx - 6, cy - 5, 12, 12, 6, Color::White);
+        renderer_.fillRoundedRect(cx - 6, cy - 5, 12, 12, 6, inverted ? Color::Black : Color::White);
         break;
       case 2: {  // ▲ up
         const int xs[] = {cx - 5, cx + 5, cx};
         const int ys[] = {cy + 6, cy + 6, cy - 4};
-        renderer_.fillPolygon(xs, ys, 3, false);
+        renderer_.fillPolygon(xs, ys, 3, inverted);
         break;
       }
       default: {  // ▼ down
         const int xs[] = {cx - 5, cx + 5, cx};
         const int ys[] = {cy - 5, cy - 5, cy + 5};
-        renderer_.fillPolygon(xs, ys, 3, false);
+        renderer_.fillPolygon(xs, ys, 3, inverted);
         break;
       }
     }
@@ -270,10 +378,15 @@ void Shell::drawPausedBadge() const {
   renderer_.fillRect(cx + 2, cy - 6, 4, 13, false);
 }
 
-void Shell::present(const bool clean) {
-  // Force a half refresh every N fast ones to clear ghosting; 0 means never.
+void Shell::present(const Refresh refresh) {
+  keysFlash_ = 0;  // the keys pressed are on this frame
+  if (refresh == Refresh::Frame) {
+    renderer_.displayBuffer(HalDisplay::FAST_REFRESH);
+    return;
+  }
+  // Force a half refresh every N fast pages to clear ghosting; 0 means never.
   const int every = settings::value(settings::kRefresh);
-  if (clean || (every > 0 && ++fastSinceClean_ >= every)) {
+  if (refresh == Refresh::Clean || (every > 0 && ++fastSinceClean_ >= every)) {
     fastSinceClean_ = 0;
     renderer_.displayBuffer(HalDisplay::HALF_REFRESH);
   } else {

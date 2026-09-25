@@ -23,6 +23,7 @@ class Shell {
   void dispatch(Action action);
 
   // Repaint if anything changed since the last flush. Returns true if it drew.
+  // When only the held front keys changed, repaints just the gutter.
   bool flush();
 
   // Call from the main loop: marks home dirty when the clock's minute changes,
@@ -41,16 +42,25 @@ class Shell {
   void showPaused();
 
  private:
+  enum class Refresh : uint8_t {
+    Page,   // a resting page: fast, with a half refresh every N (settings)
+    Clean,  // a resting page: half refresh
+    Frame,  // a transition frame or key change: always fast, never counted
+  };
+
   int depth() const;
   int clockMinute() const;
+  uint8_t litKeys() const;
   void drawHome(const layout::Rect& area);
   void drawCardStack(int depth, int slide) const;
-  void drawGutter() const;
+  void drawGutter();
   void drawPausedBadge() const;
   void drawScreen(int slide = 0);
-  void drawSlideFrame(int left);
+  void slide(const int* offsets, int count, bool settle, bool clean = false);
+  void shiftCard(int from, int to);
   void redraw(bool clean);
-  void present(bool clean);
+  void redrawKeys();
+  void present(Refresh refresh);
 
   GfxRenderer& renderer_;
   Rtc& rtc_;
@@ -60,6 +70,10 @@ class Shell {
   int selected_ = 0;        // home row
   bool chrome_ = true;
   int fastSinceClean_ = 0;
+  // Gutter buttons drawn inverted: keys held down, plus keys pressed since the
+  // last resting page (a tap shorter than a refresh still shows).
+  uint8_t keysFlash_ = 0;
+  uint8_t keysShown_ = 0;
   bool dirty_ = false;
   bool dirtyClean_ = false;
   int shownMinute_ = -1;  // minute of day on screen, -1 when the clock isn't set
