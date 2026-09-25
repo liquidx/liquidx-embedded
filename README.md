@@ -1,7 +1,7 @@
 # Embedded projects
 
 A single repo for my embedded / hardware projects. Each top-level folder is a
-self-contained project for one device + toolchain combination, with its own
+self-contained project for one platform + toolchain combination, with its own
 README, build config, and helper scripts.
 
 ## Projects
@@ -14,9 +14,16 @@ README, build config, and helper scripts.
 
 ## Conventions
 
-- **One folder per device + toolchain**, named `<device>-<toolchain>`
-  (e.g. `m5stack-resident`, `m5stack-arduino`, `rp2040-pico-sdk`, `esp32-idf`).
-  If the same device is used with a different toolchain, it gets its own folder.
+- **One folder per project**, named `<platform>-<toolchain>-<project>`
+  (e.g. `m5stack-resident-clock`, `m5stack-arduino-sensor`,
+  `rp2040-picosdk-blinky`, `esp32-idf-weather`).
+  - `<platform>` is the device or board family (`m5stack`, `xteink-x4`, `rp2040`).
+  - `<toolchain>` is the build system / SDK (`platformio`, `arduino`, `idf`).
+  - `<project>` is a short name for what the project does.
+
+  Including the project name means the same platform + toolchain can host
+  several independent projects side by side, and a platform used with a
+  different toolchain still gets its own folder.
 - **Everything a project needs lives inside its folder**: build config
   (`platformio.ini`, `CMakeLists.txt`, ...), scripts, docs, and local state
   such as device IDs or cached checkouts.
@@ -29,6 +36,6 @@ README, build config, and helper scripts.
 
 ## Adding a new project
 
-1. `mkdir <device>-<toolchain>` at the repo root.
+1. `mkdir <platform>-<toolchain>-<project>` at the repo root.
 2. Add a `README.md` following the sections above.
 3. Add a row to the **Projects** table.
