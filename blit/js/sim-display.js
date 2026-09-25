@@ -11,7 +11,7 @@
 // Events: 'frame' (a frame was shown), 'caps' (caps changed), 'log' (detail: text).
 
 import {
-  ENCODING, ERROR, FORMAT, FORMAT_INFO, KEY, KEY_ACTION, OP, POINTER_ACTION, PackBitsDecoder, STATUS,
+  ENCODING, ERROR, FORMAT, FORMAT_INFO, HELLO_FLAG, KEY, KEY_ACTION, OP, POINTER_ACTION, PackBitsDecoder, STATUS,
   crc32, encodeCaps, encodeCapsEvent, encodeKeyEvent, encodePointerEvent, encodeStatus, frameBytes, parseBegin,
 } from './protocol.js';
 import { unpackLevels } from './raster.js';
@@ -63,7 +63,8 @@ export class SimDisplay extends EventTarget {
   #link = null; // { status(bytes), event(bytes), disconnect() }
   #rx = null; // transfer in progress
   #showing = false;
-  #wantsEvents = false;
+  #wants = { keys: false, pointer: false }; // what the host's hello asked for
+  #base = null; // the full frame regions patch: { format }, or null
 
   get connected() {
     return !!this.#link;
@@ -91,16 +92,16 @@ export class SimDisplay extends EventTarget {
     this.dispatchEvent(new CustomEvent('caps', { detail: this.caps }));
   }
 
-  /** A button press, forwarded to the host if it's in caps.keys. */
+  /** A button press, forwarded to the host if it's in caps.keys and the host's hello asked for keys. */
   pressKey(key, action = KEY_ACTION.PRESS) {
-    if (!this.caps.keys.includes(key)) return false;
+    if (!this.caps.keys.includes(key) || !this.#wants.keys) return false;
     this.#event(encodeKeyEvent(key, action, Math.round(performance.now()) >>> 0));
     return true;
   }
 
   /** A tap at frame-area pixel (x, y). */
   tap(x, y) {
-    if (!this.caps.features.pointer) return false;
+    if (!this.caps.features.pointer || !this.#wants.pointer) return false;
     this.#event(encodePointerEvent(POINTER_ACTION.TAP, Math.round(x), Math.round(y)));
     return true;
   }
@@ -115,12 +116,14 @@ export class SimDisplay extends EventTarget {
   attach(link) {
     if (this.asleepUntil > Date.now()) throw new Error('Display is asleep');
     this.#link = link;
-    this.#wantsEvents = false;
+    this.#wants = { keys: false, pointer: false };
+    this.#base = null; // a new host may be diffing against anything
   }
 
   detach() {
     this.#link = null;
     this.#rx = null;
+    this.#base = null;
   }
 
   control(bytes) {
@@ -135,7 +138,7 @@ export class SimDisplay extends EventTarget {
         return undefined;
       case OP.HELLO:
         if (this.version < 2) return this.#error(ERROR.BAD_HEADER, bytes[0]);
-        this.#wantsEvents = true;
+        this.#wants = { keys: !!(bytes[2] & HELLO_FLAG.KEYS), pointer: !!(bytes[2] & HELLO_FLAG.POINTER) };
         this.#log(`Hello from ${new TextDecoder().decode(bytes.subarray(4, 4 + bytes[3])) || 'a host'} (v${bytes[1]})`);
         return this.#event(encodeCapsEvent(this.caps));
       default:
@@ -171,7 +174,7 @@ export class SimDisplay extends EventTarget {
     if (h.encoding !== ENCODING.NONE && !c.encodings.includes(h.encoding)) return this.#error(ERROR.UNSUPPORTED, h.encoding);
     if (!h.width || !h.height || h.width > 4096 || h.height > 4096) return this.#error(ERROR.BAD_HEADER);
     const expected = frameBytes(h.format, h.width, h.height);
-    if (h.byteLength > c.maxBytes || (h.encoding === ENCODING.NONE && h.byteLength !== expected)) {
+    if (h.byteLength > c.maxBytes || expected > c.maxBytes || (h.encoding === ENCODING.NONE && h.byteLength !== expected)) {
       return this.#error(ERROR.TOO_LARGE, expected);
     }
     if (h.region) {
@@ -179,7 +182,10 @@ export class SimDisplay extends EventTarget {
       const bpp = FORMAT_INFO[h.format].bpp;
       const fits = h.x + h.width <= c.width && h.y + h.height <= c.height;
       const aligned = align && h.x % align === 0 && (h.width % align === 0 || h.x + h.width === c.width) && (h.x * bpp) % 8 === 0;
-      if (!fits || !aligned) return this.#error(ERROR.BAD_REGION);
+      // A region patches the last full frame from this connection, so it
+      // needs one, of the area's size and in the same format.
+      const based = this.#base?.format === h.format;
+      if (!fits || !aligned || !based) return this.#error(ERROR.BAD_REGION);
     }
     if (this.#showing) return this.#error(ERROR.BUSY);
 
@@ -210,6 +216,7 @@ export class SimDisplay extends EventTarget {
     if (rx.decoded !== rx.pixels.length) return this.#error(ERROR.DECODE, rx.decoded);
 
     this.#draw(h, rx.pixels);
+    if (!h.region) this.#base = h.width === this.caps.width && h.height === this.caps.height ? { format: h.format } : null;
     this.lastHeader = h;
     this.#showing = true;
     this.#log(`${h.region ? 'Region' : 'Frame'} ${h.width}×${h.height} ${FORMAT_INFO[h.format].name}${h.encoding ? ' packbits' : ''}, ${h.byteLength} B${h.hold ? ' (held)' : ''}`);
@@ -268,6 +275,7 @@ export class SimDisplay extends EventTarget {
   }
 
   #resize() {
+    this.#base = null;
     const n = this.caps.width * this.caps.height * 4;
     this.buffer = new Uint8ClampedArray(n).fill(255); // what's been received
     this.visible = new Uint8ClampedArray(n).fill(255); // what's on the panel

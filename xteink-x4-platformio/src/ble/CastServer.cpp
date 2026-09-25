@@ -21,17 +21,36 @@ constexpr const char* kInfoUuid = "b1ec0001-5f3a-4e62-9a47-0c3d8e5f2a10";
 constexpr const char* kControlUuid = "b1ec0002-5f3a-4e62-9a47-0c3d8e5f2a10";
 constexpr const char* kDataUuid = "b1ec0003-5f3a-4e62-9a47-0c3d8e5f2a10";
 constexpr const char* kStatusUuid = "b1ec0004-5f3a-4e62-9a47-0c3d8e5f2a10";
+constexpr const char* kEventUuid = "b1ec0005-5f3a-4e62-9a47-0c3d8e5f2a10";
 
-constexpr uint8_t kVersion = 1;
-constexpr uint8_t kOpBegin = 0x01, kOpCommit = 0x02, kOpCancel = 0x03;
-constexpr uint8_t kEventReady = 1, kEventDone = 2, kEventError = 3, kEventAck = 4;
+constexpr uint8_t kVersion = 2;
+constexpr uint8_t kOpBegin = 0x01, kOpCommit = 0x02, kOpCancel = 0x03, kOpHello = 0x04;
+constexpr uint8_t kStatusReady = 1, kStatusDone = 2, kStatusError = 3, kStatusAck = 4;
+constexpr uint8_t kEventCaps = 0x01, kEventKey = 0x02, kEventPower = 0x04;
+constexpr uint8_t kKeyPress = 1;
+constexpr uint8_t kHelloKeys = 0x01;
+
+// Caps TLV tags and feature bits (blit/PROTOCOL.md#caps).
+constexpr uint8_t kTagName = 0x01, kTagPanel = 0x02, kTagArea = 0x03, kTagFormats = 0x04, kTagEncodings = 0x05,
+                  kTagLimits = 0x06, kTagFeatures = 0x07, kTagRegions = 0x08, kTagKeys = 0x09, kTagPacing = 0x0A,
+                  kTagPower = 0x0B;
+constexpr uint32_t kFeaturePersist = 1 << 0, kFeatureFrameSleep = 1 << 1, kFeatureFastRefresh = 1 << 2;
+
+// Regions start on a byte in every format we take (gray2 needs x % 4).
+constexpr uint8_t kRegionAlign = 8;
+constexpr uint8_t kKeys[] = {static_cast<uint8_t>(Key::Up), static_cast<uint8_t>(Key::Down),
+                             static_cast<uint8_t>(Key::Select)};
+constexpr uint32_t kRefreshMs = 1500;  // a half refresh, about
+
 // Write-without-response has no flow control: a sender that runs ahead
 // overflows the buffers on the way and chunks are silently dropped. So the
 // device acks after every kAckWindow Data writes (and the last), and senders
 // wait for each ack before sending more.
 constexpr uint32_t kAckWindow = 16;
-constexpr size_t kHeaderBytes = 21;
+constexpr size_t kV1HeaderBytes = 21;
+constexpr size_t kV2HeaderBytes = 29;
 constexpr uint16_t kMaxSide = 2048;
+constexpr uint16_t kPanelW = 800, kPanelH = 480;
 constexpr uint16_t kPreferredMtu = 517;
 constexpr size_t kAttOverhead = 3;   // ATT write opcode + handle
 constexpr size_t kOffsetBytes = 4;   // Data write prefix
@@ -39,9 +58,20 @@ constexpr size_t kOffsetBytes = 4;   // Data write prefix
 portMUX_TYPE handoffLock = portMUX_INITIALIZER_UNLOCKED;
 
 NimBLECharacteristic* statusChar = nullptr;
+NimBLECharacteristic* eventChar = nullptr;
 
 uint16_t le16(const uint8_t* p) { return p[0] | (p[1] << 8); }
 uint32_t le32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (static_cast<uint32_t>(p[3]) << 24); }
+
+uint8_t* put16(uint8_t* p, const uint16_t v) {
+  p[0] = v;
+  p[1] = v >> 8;
+  return p + 2;
+}
+uint8_t* put32(uint8_t* p, const uint32_t v) {
+  for (int i = 0; i < 4; i++) p[i] = v >> (8 * i);
+  return p + 4;
+}
 
 constexpr size_t kMaxAttrValue = 512;  // BLE caps any attribute value at 512 bytes
 
@@ -50,6 +80,8 @@ constexpr size_t kMaxAttrValue = 512;  // BLE caps any attribute value at 512 by
 uint16_t chunkFor(const uint16_t mtu) {
   return std::min<size_t>(mtu - kAttOverhead, kMaxAttrValue) - kOffsetBytes;
 }
+
+uint16_t peerMtu(const uint16_t connHandle) { return NimBLEDevice::getServer()->getPeerMTU(connHandle); }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer*, NimBLEConnInfo& info) override { server.onConnect(info.getConnHandle()); }
@@ -65,9 +97,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
 class InfoCallbacks : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* chr, NimBLEConnInfo& info) override {
-    char json[200];
-    server.fillInfo(json, sizeof(json), info.getMTU());
-    chr->setValue(reinterpret_cast<const uint8_t*>(json), strlen(json));
+    uint8_t caps[128];
+    chr->setValue(caps, server.fillCaps(caps, sizeof(caps), info.getMTU()));
   }
 };
 
@@ -110,8 +141,8 @@ void Buffer::swap(Buffer& other) {
   std::swap(capacity_, other.capacity_);
 }
 
-uint32_t crc32(const uint8_t* data, const size_t length) {
-  uint32_t crc = 0xFFFFFFFF;
+uint32_t crc32(const uint8_t* data, const size_t length, uint32_t crc) {
+  crc = ~crc;
   for (size_t i = 0; i < length; i++) {
     crc ^= data[i];
     for (int bit = 0; bit < 8; bit++) crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
@@ -136,6 +167,7 @@ bool CastServer::begin() {
   service->createCharacteristic(kControlUuid, NIMBLE_PROPERTY::WRITE)->setCallbacks(&controlCallbacks);
   service->createCharacteristic(kDataUuid, NIMBLE_PROPERTY::WRITE_NR)->setCallbacks(&dataCallbacks);
   statusChar = service->createCharacteristic(kStatusUuid, NIMBLE_PROPERTY::NOTIFY);
+  eventChar = service->createCharacteristic(kEventUuid, NIMBLE_PROPERTY::NOTIFY);
   gatt->start();
 
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
@@ -156,33 +188,73 @@ void CastServer::end() {
   if (!running_) return;
   NimBLEDevice::deinit(true);  // disconnects, stops advertising, frees the stack
   statusChar = nullptr;
+  eventChar = nullptr;
   running_ = false;
   connected_ = false;
   receiving_ = false;
   portENTER_CRITICAL(&handoffLock);
   ready_ = false;
+  base_.link = 0;
   portEXIT_CRITICAL(&handoffLock);
   LOG_INF("BLE", "Stopped");
 }
 
-bool CastServer::takeFrame(FrameHeader& header, Buffer& buffer) {
+void CastServer::hostName(char* out, const size_t size) const {
+  portENTER_CRITICAL(&handoffLock);
+  snprintf(out, size, "%s", hostName_);
+  portEXIT_CRITICAL(&handoffLock);
+}
+
+void CastServer::setArea(const int width, const int height) {
+  const bool changed = areaW_.exchange(width) != width;
+  if ((areaH_.exchange(height) != height || changed) && connected_) sendCaps();
+}
+
+void CastServer::setBattery(const uint8_t percent, const bool usb) {
+  battery_ = percent;
+  usb_ = usb;
+}
+
+void CastServer::setRegionBase(const FrameHeader& header) {
+  portENTER_CRITICAL(&handoffLock);
+  base_.link = header.link;
+  base_.format = header.format;
+  base_.width = header.width;
+  base_.height = header.height;
+  portEXIT_CRITICAL(&handoffLock);
+}
+
+bool CastServer::takeFrame(FrameHeader& header, Buffer& full, Buffer& region) {
   portENTER_CRITICAL(&handoffLock);
   const bool ready = ready_;
   if (ready) {
     header = rxHeader_;
-    rx_.swap(buffer);
+    rx_.swap(header.region() ? region : full);
     ready_ = false;
   }
   portEXIT_CRITICAL(&handoffLock);
   return ready;
 }
 
-void CastServer::notifyDone(const uint32_t sleepSeconds) { notify(kEventDone, 0, sleepSeconds); }
+void CastServer::notifyDone(const uint32_t sleepSeconds) { notify(kStatusDone, 0, sleepSeconds); }
 
 void CastServer::notifyError(const Error code, const uint32_t detail) {
   failed_ = true;
   receiving_ = false;
-  notify(kEventError, static_cast<uint8_t>(code), detail);
+  notify(kStatusError, static_cast<uint8_t>(code), detail);
+}
+
+void CastServer::sendKey(const Key key) {
+  if (eventChar == nullptr || !connected_ || !wantsKeys_) return;
+  uint8_t msg[8] = {kEventKey, static_cast<uint8_t>(key), kKeyPress, 0};
+  put32(msg + 4, millis());
+  eventChar->notify(msg, sizeof(msg));
+}
+
+void CastServer::sendPower() {
+  if (eventChar == nullptr || !connected_) return;
+  const uint8_t msg[3] = {kEventPower, battery_.load(), static_cast<uint8_t>(usb_ ? 0x02 : 0)};
+  eventChar->notify(msg, sizeof(msg));
 }
 
 void CastServer::disconnect() {
@@ -192,9 +264,66 @@ void CastServer::disconnect() {
 
 void CastServer::notify(const uint8_t event, const uint8_t code, const uint32_t value) {
   if (statusChar == nullptr || !connected_) return;
-  const uint8_t msg[6] = {event, code, static_cast<uint8_t>(value), static_cast<uint8_t>(value >> 8),
-                          static_cast<uint8_t>(value >> 16), static_cast<uint8_t>(value >> 24)};
+  uint8_t msg[6] = {event, code};
+  put32(msg + 2, value);
   statusChar->notify(msg, sizeof(msg));
+}
+
+// Caps changed (or a hello): the whole caps if they fit in a notification,
+// otherwise an empty caps event, which tells the host to read Info.
+void CastServer::sendCaps() {
+  if (eventChar == nullptr || !connected_) return;
+  const uint16_t mtu = peerMtu(connHandle_.load());
+  uint8_t msg[129] = {kEventCaps};
+  size_t length = 1 + fillCaps(msg + 1, sizeof(msg) - 1, mtu);
+  if (length > static_cast<size_t>(mtu - kAttOverhead)) length = 1;
+  eventChar->notify(msg, length);
+}
+
+size_t CastServer::fillCaps(uint8_t* out, const size_t size, const uint16_t mtu) const {
+  uint8_t caps[128];
+  uint8_t* p = caps;
+  *p++ = kVersion;
+  const auto tag = [&](const uint8_t t, const uint8_t length) -> uint8_t* {
+    *p++ = t;
+    *p++ = length;
+    return p;
+  };
+
+  const size_t nameLength = strlen(name_);
+  memcpy(tag(kTagName, nameLength), name_, nameLength);
+  p += nameLength;
+  put16(put16(tag(kTagPanel, 4), kPanelW), kPanelH);
+  p += 4;
+  put16(put16(tag(kTagArea, 4), areaW_.load()), areaH_.load());
+  p += 4;
+  // mono1 first: it refreshes fast and keeps the gutter usable. Hosts that
+  // want greys pick gray2 explicitly.
+  const bool gray = grayscale_;
+  uint8_t* formats = tag(kTagFormats, gray ? 2 : 1);
+  formats[0] = kFormatMono1;
+  if (gray) formats[1] = kFormatGray2;
+  p += gray ? 2 : 1;
+  *tag(kTagEncodings, 1) = kEncodingPackBits;
+  p += 1;
+  put16(put16(put32(tag(kTagLimits, 8), kMaxBytes), chunkFor(mtu)), kAckWindow);
+  p += 8;
+  put32(tag(kTagFeatures, 4), kFeaturePersist | kFeatureFastRefresh | (frameSleep_ ? kFeatureFrameSleep : 0));
+  p += 4;
+  *tag(kTagRegions, 1) = kRegionAlign;
+  p += 1;
+  memcpy(tag(kTagKeys, sizeof(kKeys)), kKeys, sizeof(kKeys));
+  p += sizeof(kKeys);
+  put32(put32(tag(kTagPacing, 8), 0), kRefreshMs);
+  p += 8;
+  uint8_t* power = tag(kTagPower, 2);
+  power[0] = battery_;
+  power[1] = usb_ ? 0x02 : 0;
+  p += 2;
+
+  const size_t length = std::min<size_t>(p - caps, size);
+  memcpy(out, caps, length);
+  return length;
 }
 
 // --- NimBLE callbacks (BLE task) --------------------------------------------
@@ -209,6 +338,11 @@ void CastServer::onConnect(const uint16_t connHandle) {
   gatt->updateConnParams(connHandle, 12, 24, 0, 400);
   gatt->setDataLen(connHandle, 251);
   connHandle_ = connHandle;
+  link_++;
+  wantsKeys_ = false;
+  portENTER_CRITICAL(&handoffLock);
+  hostName_[0] = '\0';
+  portEXIT_CRITICAL(&handoffLock);
   connected_ = true;
   activity_ = true;
   LOG_INF("BLE", "Connected");
@@ -219,15 +353,6 @@ void CastServer::onDisconnect() {
   receiving_ = false;
   activity_ = true;
   NimBLEDevice::startAdvertising();
-}
-
-void CastServer::fillInfo(char* out, const size_t size, const uint16_t mtu) const {
-  snprintf(out, size,
-           "{\"v\":%u,\"name\":\"%s\",\"w\":%d,\"h\":%d,\"fullW\":800,\"fullH\":480,\"chunk\":%u,"
-           "\"window\":%u,\"maxBytes\":%u,\"formats\":[%u],\"frameSleep\":%s}",
-           kVersion, name_, areaW_.load(), areaH_.load(), chunkFor(mtu), static_cast<unsigned>(kAckWindow),
-           static_cast<unsigned>(kMaxBytes),
-           kFormatRaw1, frameSleep_ ? "true" : "false");
 }
 
 void CastServer::onControl(const uint8_t* data, const size_t length) {
@@ -241,77 +366,179 @@ void CastServer::onControl(const uint8_t* data, const size_t length) {
     case kOpCancel:
       receiving_ = false;
       return;
+    case kOpHello:
+      return hello(data, length);
     default:
       return notifyError(Error::BadHeader, data[0]);
   }
 }
 
+void CastServer::hello(const uint8_t* d, const size_t length) {
+  if (length < 4) return notifyError(Error::BadHeader, kOpHello);
+  wantsKeys_ = d[2] & kHelloKeys;
+  const size_t nameLength = std::min<size_t>({d[3], length - 4, sizeof(hostName_) - 1});
+  portENTER_CRITICAL(&handoffLock);
+  memcpy(hostName_, d + 4, nameLength);
+  hostName_[nameLength] = '\0';
+  portEXIT_CRITICAL(&handoffLock);
+  LOG_INF("BLE", "Hello from %.*s (v%u)", static_cast<int>(nameLength), d + 4, d[1]);
+  sendCaps();
+}
+
+bool CastServer::parseHeader(const uint8_t* d, const size_t length, FrameHeader& h) {
+  size_t nameAt, nameLength;
+  if (length >= 2 && d[1] == 1) {
+    if (length < kV1HeaderBytes || length < kV1HeaderBytes + d[20]) return false;
+    h.version = 1;
+    h.format = d[2];
+    h.flags = d[3] & kFlagPersist;
+    h.width = le16(d + 4);
+    h.height = le16(d + 6);
+    h.byteLength = le32(d + 8);
+    h.crc32 = le32(d + 12);
+    h.nextFrameSeconds = le32(d + 16);
+    nameAt = kV1HeaderBytes;
+    nameLength = d[20];
+  } else {
+    if (length < kV2HeaderBytes || length < kV2HeaderBytes + d[28]) return false;
+    h.version = d[1];
+    h.format = d[2];
+    h.encoding = d[3];
+    h.flags = d[4];
+    h.refresh = d[5] <= 2 ? static_cast<Refresh>(d[5]) : Refresh::Auto;
+    h.width = le16(d + 6);
+    h.height = le16(d + 8);
+    if (h.region()) {
+      h.x = le16(d + 10);
+      h.y = le16(d + 12);
+    }
+    h.byteLength = le32(d + 16);
+    h.crc32 = le32(d + 20);
+    h.nextFrameSeconds = le32(d + 24);
+    nameAt = kV2HeaderBytes;
+    nameLength = d[28];
+  }
+  nameLength = std::min(nameLength, sizeof(h.name) - 1);
+  memcpy(h.name, d + nameAt, nameLength);
+  h.name[nameLength] = '\0';
+  return true;
+}
+
+// A region patches the full frame on screen, so it has to match it: received
+// on this connection, the same format, and exactly the current area (after the
+// area changes the host re-renders at the new size anyway).
+bool CastServer::regionFits(const FrameHeader& h) const {
+  portENTER_CRITICAL(&handoffLock);
+  const auto base = base_;
+  portEXIT_CRITICAL(&handoffLock);
+  const int areaW = areaW_, areaH = areaH_;
+  const uint32_t right = h.x + h.width;
+  return base.link == link_ && base.format == h.format && base.width == areaW && base.height == areaH &&
+         right <= static_cast<uint32_t>(areaW) && h.y + h.height <= areaH && h.x % kRegionAlign == 0 &&
+         (h.width % kRegionAlign == 0 || right == static_cast<uint32_t>(areaW));
+}
+
 void CastServer::beginFrame(const uint8_t* d, const size_t length) {
   receiving_ = false;
-  if (length < kHeaderBytes || length < kHeaderBytes + d[20]) return notifyError(Error::BadHeader);
-
   FrameHeader h;
-  h.format = d[2];
-  h.flags = d[3];
-  h.width = le16(d + 4);
-  h.height = le16(d + 6);
-  h.byteLength = le32(d + 8);
-  h.crc32 = le32(d + 12);
-  h.nextFrameSeconds = le32(d + 16);
-  const size_t nameLength = std::min<size_t>(d[20], sizeof(h.name) - 1);
-  memcpy(h.name, d + kHeaderBytes, nameLength);
-  h.name[nameLength] = '\0';
+  if (!parseHeader(d, length, h)) return notifyError(Error::BadHeader);
+  h.link = link_;
 
-  if (d[1] != kVersion || h.format != kFormatRaw1) return notifyError(Error::Unsupported, h.format);
+  if (h.version < 1 || h.version > kVersion) return notifyError(Error::Unsupported, h.version);
+  if (h.format != kFormatMono1 && !(h.format == kFormatGray2 && grayscale_)) {
+    return notifyError(Error::Unsupported, h.format);
+  }
+  if (h.encoding != kEncodingNone && h.encoding != kEncodingPackBits) {
+    return notifyError(Error::Unsupported, h.encoding);
+  }
   if (h.width == 0 || h.height == 0 || h.width > kMaxSide || h.height > kMaxSide) {
     return notifyError(Error::BadHeader);
   }
-  const uint32_t expectedBytes = static_cast<uint32_t>((h.width + 7) / 8) * h.height;
-  if (h.byteLength != expectedBytes || h.byteLength > kMaxBytes) return notifyError(Error::TooLarge, expectedBytes);
+  // Both the payload as sent and the frame it decodes to must fit.
+  const uint32_t frameBytes = h.frameBytes();
+  if (h.byteLength > kMaxBytes || frameBytes > kMaxBytes ||
+      (h.encoding == kEncodingNone && h.byteLength != frameBytes)) {
+    return notifyError(Error::TooLarge, frameBytes);
+  }
+  if (h.region() && !regionFits(h)) return notifyError(Error::BadRegion);
 
   portENTER_CRITICAL(&handoffLock);
   const bool busy = ready_;
   portEXIT_CRITICAL(&handoffLock);
   if (busy) return notifyError(Error::Busy);
-  if (!rx_.reserve(h.byteLength)) return notifyError(Error::TooLarge);
+  if (!rx_.reserve(frameBytes)) return notifyError(Error::TooLarge, frameBytes);
 
   rxHeader_ = h;
   failed_ = false;
-  expected_ = 0;
-  unacked_ = 0;
+  received_ = decoded_ = crc_ = unacked_ = 0;
+  literal_ = 0;
+  repeat_ = 0;
   receiving_ = true;
-  notify(kEventReady, 0, chunkFor(NimBLEDevice::getServer()->getPeerMTU(connHandle_.load())));
+  notify(kStatusReady, 0, chunkFor(peerMtu(connHandle_.load())));
+}
+
+void CastServer::fail(const Error code, const uint32_t detail) {
+  receiving_ = false;
+  notifyError(code, detail);
 }
 
 void CastServer::onData(const uint8_t* data, const size_t length) {
   if (!receiving_ || length < kOffsetBytes) return;
   const uint32_t offset = le32(data);
   const size_t n = length - kOffsetBytes;
-  if (offset != expected_) {
-    receiving_ = false;
-    return notifyError(Error::OutOfOrder, expected_);
-  }
-  if (expected_ + n > rxHeader_.byteLength) {
-    receiving_ = false;
-    return notifyError(Error::TooLarge, rxHeader_.byteLength);
-  }
-  memcpy(rx_.data() + expected_, data + kOffsetBytes, n);
-  expected_ += n;
-  if (++unacked_ >= kAckWindow || expected_ == rxHeader_.byteLength) {
+  if (offset != received_) return fail(Error::OutOfOrder, received_);
+  if (received_ + n > rxHeader_.byteLength) return fail(Error::TooLarge, rxHeader_.byteLength);
+  crc_ = crc32(data + kOffsetBytes, n, crc_);
+  decode(data + kOffsetBytes, n);
+  received_ += n;
+  if (++unacked_ >= kAckWindow || received_ == rxHeader_.byteLength) {
     unacked_ = 0;
-    notify(kEventAck, 0, expected_);
+    notify(kStatusAck, 0, received_);
   }
+}
+
+// Straight into the frame buffer as bytes arrive. PackBits runs may span
+// Data writes, so the decoder's state lives between calls.
+void CastServer::decode(const uint8_t* data, const size_t length) {
+  if (rxHeader_.encoding == kEncodingNone) {
+    memcpy(rx_.data() + decoded_, data, length);
+    decoded_ += length;
+    return;
+  }
+  for (size_t i = 0; i < length; i++) {
+    const uint8_t b = data[i];
+    if (literal_ > 0) {
+      put(b, 1);
+      literal_--;
+    } else if (repeat_ > 0) {
+      put(b, repeat_);
+      repeat_ = 0;
+    } else if (b < 0x80) {
+      literal_ = b + 1;
+    } else if (b > 0x80) {
+      repeat_ = 257 - b;
+    }  // 0x80: no-op
+  }
+}
+
+// Write `count` copies of `byte`, dropping (but counting) any past the end.
+void CastServer::put(const uint8_t byte, const uint32_t count) {
+  const uint32_t size = rxHeader_.frameBytes();
+  if (decoded_ < size) memset(rx_.data() + decoded_, byte, std::min(count, size - decoded_));
+  decoded_ += count;
 }
 
 void CastServer::commitFrame() {
   if (!receiving_) return notifyError(Error::Incomplete, 0);
   receiving_ = false;
-  if (expected_ != rxHeader_.byteLength) return notifyError(Error::Incomplete, expected_);
-  if (crc32(rx_.data(), rxHeader_.byteLength) != rxHeader_.crc32) return notifyError(Error::BadCrc);
+  if (received_ != rxHeader_.byteLength) return notifyError(Error::Incomplete, received_);
+  if (crc_ != rxHeader_.crc32) return notifyError(Error::BadCrc);
+  if (decoded_ != rxHeader_.frameBytes()) return notifyError(Error::Decode, decoded_);
   portENTER_CRITICAL(&handoffLock);
   ready_ = true;
   portEXIT_CRITICAL(&handoffLock);
-  LOG_INF("BLE", "Frame %ux%u received (%u bytes)", rxHeader_.width, rxHeader_.height, rxHeader_.byteLength);
+  LOG_INF("BLE", "%s %ux%u received (%u bytes%s)", rxHeader_.region() ? "Region" : "Frame", rxHeader_.width,
+          rxHeader_.height, rxHeader_.byteLength, rxHeader_.encoding ? ", packbits" : "");
 }
 
 }  // namespace cast

@@ -34,8 +34,9 @@ int drawPill(GfxRenderer& r, int font, int x, int y, const char* text, bool blac
 
 // The page label pill at the top-left of a card, uppercased. Returns the y
 // where content below it starts. With title == nullptr (chrome hidden) only
-// returns that y.
-int drawTitle(GfxRenderer& r, const layout::Rect& area, const char* title);
+// returns that y. `pill`, if given, is set to the pill's bounds (empty when
+// there's no title).
+int drawTitle(GfxRenderer& r, const layout::Rect& area, const char* title, layout::Rect* pill = nullptr);
 
 // One selectable row: optional icon, label, and a value right-aligned. The
 // selected row is a black pill with white text. Anything selectable uses the

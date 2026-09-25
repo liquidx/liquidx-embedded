@@ -292,6 +292,12 @@ export class Blit extends EventTarget {
         const sleepSeconds = await this.#transfer(header, wire, opts.signal);
         return { sleepSeconds, skipped: false, region, bytes: wire.length, encoding };
       } catch (err) {
+        if (err instanceof BlitError && err.code === ERROR.BAD_REGION && region && !opts.region) {
+          // The display doesn't hold the frame we diffed against (it restarted,
+          // reconnected, or its area changed): send the whole frame instead.
+          this.#last = null;
+          return this.#send(pixels, opts);
+        }
         if (!(err instanceof BlitError) || err.code !== ERROR.BUSY || attempt >= BUSY_RETRIES) {
           this.#last = null; // the display may not have it: don't diff against it
           throw err;

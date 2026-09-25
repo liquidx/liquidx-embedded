@@ -185,3 +185,21 @@ test('end to end: the display rejects bad frames with errors', async () => {
   // Still usable afterwards.
   await blit.sendFrame(frame(FORMAT.MONO1, 64, 32), { width: 64, height: 32 });
 });
+
+test('end to end: a region the display has no base for is resent as a full frame', async () => {
+  const { display, blit } = await connected({ width: 64, height: 32 });
+  const a = frame(FORMAT.MONO1, 64, 32);
+  await blit.sendFrame(a, { width: 64, height: 32, regions: true });
+  // The display loses the frame the host diffs against (as after a restart).
+  display.setCaps({ width: 64 });
+  const b = a.slice();
+  b[10 * 8 + 1] = 0x80; // row 10, pixel 8 -> black
+  const r = await blit.sendFrame(b, { width: 64, height: 32, regions: true });
+  assert.equal(r.region, null);
+  assert.equal(display.lastHeader.region, false);
+  assert.equal(display.visible[(10 * 64 + 8) * 4], 0);
+  // The next change goes as a region again.
+  const c = b.slice();
+  c[20 * 8] = 0x80;
+  assert.deepEqual((await blit.sendFrame(c, { width: 64, height: 32, regions: true })).region, { x: 0, y: 20, width: 8, height: 1 });
+});

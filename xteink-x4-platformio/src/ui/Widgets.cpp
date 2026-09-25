@@ -113,13 +113,15 @@ int drawPill(GfxRenderer& r, const int font, const int x, const int y, const cha
   return w;
 }
 
-int drawTitle(GfxRenderer& r, const layout::Rect& area, const char* title) {
+int drawTitle(GfxRenderer& r, const layout::Rect& area, const char* title, layout::Rect* pill) {
+  if (pill != nullptr) *pill = {0, 0, 0, 0};
   if (title == nullptr) return area.y + kTitleY;
   char upper[64];
   size_t i = 0;
   for (; title[i] != '\0' && i < sizeof(upper) - 1; i++) upper[i] = static_cast<char>(toupper(title[i]));
   upper[i] = '\0';
-  drawPill(r, fonts::LABEL_15, contentLeft(area), area.y + kTitleY, upper);
+  const int w = drawPill(r, fonts::LABEL_15, contentLeft(area), area.y + kTitleY, upper);
+  if (pill != nullptr) *pill = {contentLeft(area), area.y + kTitleY, w, kPillH};
   return area.y + kContentTop;
 }
 

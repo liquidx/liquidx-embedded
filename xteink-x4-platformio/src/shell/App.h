@@ -61,6 +61,18 @@ class App {
   virtual Result tick() { return Result::Ignored; }
   virtual bool busy() const { return false; }
 
+  // Greyscale: true if the page last rendered has grey pixels. render() drew
+  // them thresholded to black and white; drawGray() then writes their true
+  // levels into the two absolute planes of a 4-level refresh (see
+  // Shell::presentGray), in screen coordinates, 100 bytes a row, MSB first.
+  // Planes start as copies of the B/W page; only change grey pixels and leave
+  // anything the app drew over them alone.
+  virtual bool hasGray() const { return false; }
+  virtual void drawGray(uint8_t* lsb, uint8_t* msb, const layout::Rect& area) const {}
+
+  // Called once a resting page (not a transition frame) is on the panel.
+  virtual void presented() {}
+
   // True (once) if something outside the keys happened that should hold off
   // auto-sleep, e.g. a frame arriving over Bluetooth.
   virtual bool takeActivity() { return false; }

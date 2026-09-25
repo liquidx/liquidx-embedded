@@ -5,8 +5,8 @@ Chrome extension) to a small, low-power **display** (an e-paper reader, a
 badge, a stick with an LCD), and sends the display's button presses back.
 
 This document is the spec. Version **2** is described here, with version
-**1** (what the X4 firmware ships today, formerly "ble-cast") as a subset that
-every host still has to speak. [Compatibility with v1](#compatibility-with-v1)
+**1** (what the X4 firmware first shipped, formerly "ble-cast") as a subset
+that every host still has to speak. [Compatibility with v1](#compatibility-with-v1)
 lists the differences.
 
 | Term | Meaning |
@@ -98,10 +98,10 @@ something.
    (0x7B), the display speaks v1: see
    [Compatibility with v1](#compatibility-with-v1).
 3. **Subscribe** to Status, and to Event if the display has it.
-4. **Hello** (v2, optional over BLE): write a [hello](#hello-0x04) to Control.
-   The display answers with a `caps` event. This lets it know a v2 host is
-   listening, e.g. to start sending key presses to it instead of handling them
-   itself.
+4. **Hello** (v2): write a [hello](#hello-0x04) to Control. The display
+   answers with a `caps` event. It's optional over BLE unless the host wants
+   key or pointer events: a display sends those only after a hello that asks
+   for them, so it can keep handling its buttons itself until then.
 5. **Send frames**, one at a time, as described below. Re-read caps (or use the
    `caps` event) before rendering each frame, because the frame area can
    change at any time.
@@ -177,6 +177,19 @@ inside the area. Its `x` must be a multiple of caps `regionAlign`, and so
 must its `width`, unless the region reaches the right edge of the area.
 Otherwise the display returns error 9.
 
+**What a region patches.** A region changes pixels of the **last full frame
+received on the current connection**, and nothing else. That frame must be
+exactly the current area and in the same format as the region. The display
+returns error 9 when it has no such frame: after a reconnect (including
+waking from [frame sleep](#sleeping-between-frames)), a restart, an area
+change, or when the last full frame was another size or format. A display
+can't check that the host is diffing against the same pixels it holds, so it
+only trusts a frame it got from this host on this link.
+
+On error 9 for a region it computed itself, a host sends the same content
+again as a full frame (the JS host does this automatically). Hosts should also
+stop diffing against their last frame when the area changes.
+
 ### Pixel formats
 
 Every format stores rows top to bottom. Each row starts on a byte boundary
@@ -228,14 +241,14 @@ reply.
 
 ### Hello (0x04)
 
-v2, optional over BLE. Required on stream transports, which have no Info
-read.
+v2. Optional over BLE, unless the host wants key or pointer events. Required
+on stream transports, which have no Info read.
 
 | Offset | Size | Field |
 | --- | --- | --- |
 | 0 | 1 | `op` = `0x04` |
 | 1 | 1 | `version`: the highest protocol version the host speaks |
-| 2 | 1 | `flags`: bit 0 wants key events, bit 1 wants pointer events. Other bits reserved. |
+| 2 | 1 | `flags`: bit 0 wants key events, bit 1 wants pointer events. Other bits reserved. A display sends key and pointer events only while the latest hello on the connection asks for them. |
 | 3 | 1 | `nameLength` (0–32) |
 | 4 | n | `name`: UTF-8 host name, e.g. `Chrome: Grafana`. The display may show it. |
 
@@ -249,7 +262,7 @@ Status notifications are six bytes: `u8 event`, `u8 code`, `u32 value`.
 | Event | Meaning | `code` | `value` |
 | --- | --- | --- | --- |
 | 1 `ready` | Begin accepted, send Data | 0 | chunk size for this frame |
-| 2 `done` | Frame received, checked and shown | 0 | seconds the display will sleep before listening again; 0 = staying connected |
+| 2 `done` | Frame received, checked and shown (for a `hold` frame: received and stored; nothing is shown yet) | 0 | seconds the display will sleep before listening again; 0 = staying connected |
 | 3 `error` | Frame rejected. Start again with Begin. | error code | detail |
 | 4 `ack` | Data received so far | 0 | bytes received |
 
@@ -263,7 +276,7 @@ Status notifications are six bytes: `u8 event`, `u8 code`, `u32 value`.
 | 6 | Commit before all bytes arrived | bytes received |
 | 7 | CRC mismatch | |
 | 8 | Couldn't persist (the frame is still shown) | |
-| 9 | Region outside the frame area, or misaligned (v2) | |
+| 9 | Region outside the frame area, misaligned, or with no full frame to patch (v2, see [what a region patches](#frame-header-begin-0x01)) | |
 | 10 | Payload didn't decode to the frame size (v2) | decoded bytes |
 
 ## Caps
@@ -294,7 +307,11 @@ out any tag, in which case the default applies. Info values are limited to
 | 0x0A | `pacing` | `u32 minIntervalMs` (don't begin frames closer than this), `u32 refreshMs` (typical time to show a frame) | 0, 0 |
 | 0x0B | `power` | `u8 battery` (percent, 255 = unknown), `u8 flags` (bit 0 charging, bit 1 on external power) | unknown |
 
-`maxBytes` limits `byteLength`, the payload as sent. `chunk` is the largest
+`maxBytes` limits both `byteLength`, the payload as sent, and the frame once
+decoded (`rowBytes × height`). Without the second limit a few bytes of
+PackBits could ask for megabytes of frame buffer, against principle 1. A
+display rejects either with error 3, and a host should render at `area` in a
+format whose plain frame size fits. `chunk` is the largest
 payload per Data write, after the 4-byte offset. Over BLE that's
 `min(MTU − 3, 512) − 4`. The chunk size in `ready` wins over it, because the
 MTU can change after Info is read.
@@ -321,8 +338,9 @@ The display asks and the host follows. Some examples:
 
 v2. Notifications on the Event characteristic, sent when something happens.
 The first byte is the event type. Events are sent only while a host is
-connected and subscribed. They are **never queued across a disconnect**,
-because stale key presses do more harm than lost ones.
+connected and subscribed, and `key` and `pointer` events only after a
+[hello](#hello-0x04) that asks for them. They are **never queued across a
+disconnect**, because stale key presses do more harm than lost ones.
 
 | Type | Name | Layout | Notes |
 | --- | --- | --- | --- |
@@ -401,7 +419,7 @@ binary frame, and the `u16 length` is left out.
 
 ## Compatibility with v1
 
-v1 is what `xteink-x4-platformio` ships today. It is v2 without events,
+v1 is what `xteink-x4-platformio` first shipped. It is v2 without events,
 hello, regions, encodings or formats other than `mono1`, and with a JSON Info
 and a shorter header. Every host must support v1 displays. A v2 display may
 also accept v1 headers.
@@ -450,7 +468,7 @@ Status, Data, commit, cancel, errors 1–8 and sleeping are the same as v2.
 
 | Where | Role | Speaks |
 | --- | --- | --- |
-| [`xteink-x4-platformio`](../xteink-x4-platformio/) (`src/ble/CastServer.*`, `src/apps/BleApp.*`) | display (Xteink X4, e-paper) | v1 |
+| [`xteink-x4-platformio`](../xteink-x4-platformio/) (`src/ble/CastServer.*`, `src/apps/BleApp.*`) | display (Xteink X4, e-paper): `mono1` and `gray2`, PackBits, regions, keys up / down / select | v2 (and v1 headers) |
 | [`js/`](js/) | host library, plus a simulated display | v1, v2 |
 | [`web/`](web/) | demo page: images, slideshows, live element capture | via `js/` |
 | [`chrome-extension/`](chrome-extension/) | blits a browser tab | via `js/` |
@@ -481,3 +499,56 @@ Status, Data, commit, cancel, errors 1–8 and sleeping are the same as v2.
   aligned out to `regionAlign`.
 - Keep a queue of one: if a new frame is rendered while one is in flight,
   replace the waiting frame rather than queueing both.
+- On error 9 for a region you computed, resend it as a full frame. The display
+  forgets its region base on every reconnect.
+
+## Open issues
+
+Found implementing v2 on the X4. The first two need a change to the wire
+format, so they're written up here rather than in the spec above. v2 isn't on
+any shipped hardware yet, so now is the cheap time to make them.
+
+### Regions don't survive a reconnect
+
+Regions save the most where the radio is costly: a dashboard or clock that
+changes a few digits a minute, with [frame sleep](#sleeping-between-frames)
+between frames. But every wake is a new connection, and a display can only
+trust a region base it received on the current one (see [what a region
+patches](#frame-header-begin-0x01)). So with frame sleep, every frame is a
+full frame and regions never help.
+
+**Proposal:** name the base in the header. Add `u32 baseCrc` to the v2
+header: the CRC-32 of the full frame (unencoded pixels, `rowBytes × height`)
+the region applies to, 0 for a full frame. The display keeps the CRC of the
+frame it holds, updating it after each region (it has to touch every patched
+row anyway, or CRC the whole frame, 48 KB on the X4, in a few ms). It accepts
+a region whose `baseCrc` matches, whatever connection it arrives on, and
+returns error 9 otherwise. A display that reloads its last frame from storage
+after a restart (the X4 does, when the frame was persisted) can then accept
+regions against it too. The two reserved bytes at offset 14 are too small, so
+the header grows to 33 bytes: `baseCrc` at 29, `nameLength` at 33, `name` at
+34. Hosts send `version` 2 either way; a display that sees a 29-byte layout
+(v2 without the field) can't be told apart, so this should land before any
+v2 display ships, or come in as version 3.
+
+### One refresh time for every format
+
+`pacing.refreshMs` is one number, but on e-paper a greyscale refresh is a
+different and much slower waveform than a black-and-white one (the X4 offers
+`gray2` behind `mono1` for this reason). A host pacing a slideshow or
+retrying after busy waits the wrong time for one of them.
+
+**Proposal:** let the `pacing` tag carry an optional list after the two
+`u32`s: `u8 format, u32 refreshMs` per format that differs from the default.
+Old hosts read the first 8 bytes and ignore the rest.
+
+### Greys are fragile on e-paper
+
+Not a wire-format issue, but worth knowing when choosing formats: on the X4 a
+4-level image is a separate refresh pass, and any later black-and-white
+refresh (a status change, a key highlight) turns it back into black and
+white. The X4 handles this by showing no key feedback over a grey frame,
+redrawing status changes with another grey pass (except the brief
+"Receiving"), and advertising `mono1` first so hosts only send greys when a
+user asks for them. A future `features` bit could tell hosts "greys cost more
+than the refresh time suggests", if hosts need to know.

@@ -68,6 +68,7 @@ class Shell {
   void redraw(bool clean);
   void redrawKeys();
   void present(Refresh refresh);
+  bool presentGray();
 
   GfxRenderer& renderer_;
   Rtc& rtc_;
@@ -83,6 +84,8 @@ class Shell {
   uint8_t keysFlash_ = 0;
   uint8_t keysShown_ = 0;
   bool forceClean_ = false;  // the panel doesn't match the framebuffer
+  bool grayShown_ = false;   // the panel shows greys the framebuffer doesn't hold
+  layout::Rect pageArea_{};  // where the top page was last drawn, in place
   bool dirty_ = false;
   bool dirtyClean_ = false;
   int shownMinute_ = -1;  // minute of day on screen, -1 when the clock isn't set

@@ -1,7 +1,9 @@
 #include "Shell.h"
 
 #include <Arduino.h>
+#include <HalDisplay.h>
 #include <HalPowerManager.h>
+#include <esp_heap_caps.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -59,6 +61,26 @@ void shiftRow(uint8_t* dst, const uint8_t* src, const int n, const int shift) {
   }
 }
 
+// Greyscale planes for Shell::presentGray, allocated on first use (PSRAM).
+uint8_t* grayPlanes = nullptr;
+
+// Copy the framebuffer's pixels in a rect back into both grey planes, as
+// black and white.
+void restoreBw(uint8_t* lsb, uint8_t* msb, const uint8_t* fb, const int x, const int y, const int w, const int h) {
+  constexpr int stride = layout::kScreenW / 8;
+  const int x0 = std::max(0, x), x1 = std::min(layout::kScreenW, x + w);
+  for (int row = std::max(0, y); row < std::min(layout::kScreenH, y + h); row++) {
+    for (int b = x0 / 8; b * 8 < x1; b++) {
+      // Bits of this byte inside [x0, x1), MSB = leftmost pixel.
+      const int from = std::max(x0 - b * 8, 0), to = std::min(x1 - b * 8, 8);
+      const uint8_t mask = static_cast<uint8_t>((0xFF >> from) & (0xFF << (8 - to)));
+      const int at = row * stride + b;
+      lsb[at] = (lsb[at] & ~mask) | (fb[at] & mask);
+      msb[at] = (msb[at] & ~mask) | (fb[at] & mask);
+    }
+  }
+}
+
 const char* const kWeekdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 const char* const kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
@@ -92,7 +114,8 @@ void Shell::invalidate(const bool clean) {
 bool Shell::flush() {
   if (!dirty_) {
     // The framebuffer still holds what's on the panel: touch up the gutter.
-    if (!chrome_ || forceClean_ || litKeys() == keysShown_) return false;
+    // Nor over greys: any B/W refresh would wipe them.
+    if (!chrome_ || forceClean_ || grayShown_ || litKeys() == keysShown_) return false;
     redrawKeys();
     return true;
   }
@@ -246,7 +269,9 @@ void Shell::showPaused() {
   chrome_ = false;
   drawScreen();
   drawBadge(Badge::Paused);
-  renderer_.displayBuffer(HalDisplay::HALF_REFRESH);
+  if (current_ == nullptr || !current_->hasGray() || !presentGray()) {
+    renderer_.displayBuffer(HalDisplay::HALF_REFRESH);
+  }
 }
 
 void Shell::redraw(const bool clean) {
@@ -267,6 +292,7 @@ void Shell::drawScreen(const int slide) {
   renderer_.clearScreen();
   auto area = chrome_ ? layout::cardArea(depth()) : layout::kFullScreen;
   area.x -= slide;
+  if (slide == 0) pageArea_ = area;
   const int clipX = std::max(0, area.x);  // pixels left of the panel aren't drawable
   renderer_.setClipRect(clipX, area.y, area.x + area.w - clipX, area.h);
   if (current_ == nullptr) {
@@ -416,9 +442,17 @@ void Shell::drawBadge(const Badge badge) const {
 void Shell::present(const Refresh refresh) {
   keysFlash_ = 0;  // the keys pressed are on this frame
   if (refresh == Refresh::Frame && !forceClean_) {
+    grayShown_ = false;
     renderer_.displayBuffer(HalDisplay::FAST_REFRESH);
     return;
   }
+  if (refresh != Refresh::Frame && current_ != nullptr && current_->hasGray() && presentGray()) {
+    forceClean_ = false;
+    fastSinceClean_ = 0;
+    current_->presented();
+    return;
+  }
+  grayShown_ = false;
   // Force a half refresh every N fast pages to clear ghosting; 0 means never.
   const int every = settings::value(settings::kRefresh);
   if (refresh == Refresh::Clean || forceClean_ || (every > 0 && ++fastSinceClean_ >= every)) {
@@ -428,4 +462,44 @@ void Shell::present(const Refresh refresh) {
   } else {
     renderer_.displayBuffer(HalDisplay::FAST_REFRESH);
   }
+  if (refresh != Refresh::Frame && current_ != nullptr) current_->presented();
+}
+
+// A 4-level refresh of the page in the framebuffer plus the open app's greys
+// (FreeInk's absolute planes: black 00, dark 10, light 01, white 11 as LSB,
+// MSB). Slow, and the driver makes the next B/W refresh a clean one. Returns
+// false if the panel or memory can't do it; the caller then refreshes in B/W.
+bool Shell::presentGray() {
+  if (!display.grayscaleCapabilities(HalDisplay::GrayscaleMode::Absolute).supported()) return false;
+  constexpr size_t kPlane = HalDisplay::BUFFER_SIZE;
+  if (grayPlanes == nullptr) {
+    grayPlanes = static_cast<uint8_t*>(heap_caps_malloc(kPlane * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (grayPlanes == nullptr) return false;
+  }
+  uint8_t* lsb = grayPlanes;
+  uint8_t* msb = grayPlanes + kPlane;
+  const uint8_t* fb = renderer_.getFrameBuffer();
+  if (fb == nullptr || !kPanelNative) return false;
+  memcpy(lsb, fb, kPlane);  // B/W: 1 = white = (1, 1)
+  memcpy(msb, fb, kPlane);
+  current_->drawGray(lsb, msb, pageArea_);
+
+  // Put back what the shell drew over the page: its badge, and the top card's
+  // right edge and rounded corners.
+  constexpr int R = layout::kKeyRadius;
+  constexpr int cy = layout::kScreenH - (layout::kScreenW - layout::kKeyCenterX);
+  restoreBw(lsb, msb, fb, layout::kKeyCenterX - R, cy - R, R * 2, R * 2);
+  if (chrome_) {
+    constexpr int C = layout::kCardRadius + 2;
+    const int right = layout::cardWidth(depth());
+    restoreBw(lsb, msb, fb, right - 2, 0, 2, layout::kScreenH);
+    restoreBw(lsb, msb, fb, right - C, 0, C, C);
+    restoreBw(lsb, msb, fb, right - C, layout::kScreenH - C, C, C);
+  }
+
+  if (!renderer_.displayGrayscaleBase(HalDisplay::GrayscaleMode::Absolute, HalDisplay::HALF_REFRESH)) return false;
+  display.copyGrayscaleBuffers(lsb, msb);
+  renderer_.displayGrayBuffer();
+  grayShown_ = true;
+  return true;
 }
