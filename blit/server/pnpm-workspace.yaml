@@ -1,0 +1,7 @@
+allowBuilds:
+  puppeteer: true
+  '@stoprocent/noble': true
+  '@stoprocent/bluetooth-hci-socket': true
+  # Only for noble's HCI-over-UART/USB bindings, which blit-server doesn't use.
+  '@serialport/bindings-cpp': false
+  usb: false

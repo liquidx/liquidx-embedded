@@ -11,6 +11,8 @@ display just copies bytes to its panel.
   blits one of its own elements.
 - **[chrome-extension/](chrome-extension/)**: blit any browser tab, or part
   of one, and drive the page with the display's buttons.
+- **[server/](server/)**: a headless host in Node: renders a URL in headless
+  Chromium and keeps a display up to date, from the command line.
 
 Displays: the [Xteink X4 firmware](../xteink-x4-platformio/) (Bluetooth app)
 speaks v2. The library speaks v1 and v2. The simulated display speaks both,

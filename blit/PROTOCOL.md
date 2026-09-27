@@ -472,6 +472,7 @@ Status, Data, commit, cancel, errors 1–8 and sleeping are the same as v2.
 | [`js/`](js/) | host library, plus a simulated display | v1, v2 |
 | [`web/`](web/) | demo page: images, slideshows, live element capture | via `js/` |
 | [`chrome-extension/`](chrome-extension/) | blits a browser tab | via `js/` |
+| [`server/`](server/) | headless host (Node, headless Chromium, BLE via noble) | via `js/` |
 
 ### Notes for display implementers
 

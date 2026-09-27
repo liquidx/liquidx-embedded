@@ -1,0 +1,27 @@
+{
+  "name": "blit-server",
+  "private": true,
+  "description": "Headless blit host: renders a URL in headless Chromium and sends it to a blit display. See README.md.",
+  "type": "module",
+  "bin": {
+    "blit-server": "src/cli.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "start": "node src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@stoprocent/noble": "^2.8.0",
+    "pngjs": "^7.0.0",
+    "puppeteer": "^25.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/pngjs": "^6.0.5",
+    "typescript": "^7.0.2"
+  }
+}
