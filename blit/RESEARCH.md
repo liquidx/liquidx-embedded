@@ -21,12 +21,12 @@ The short version:
   so the sender can skip a transfer or send a diff against it. This is the
   `baseCrc` open issue in [PROTOCOL.md](PROTOCOL.md#regions-dont-survive-a-reconnect),
   taken a step further.
-- **PackBits already does most of the compression work; the rest is worth
-  having.** Measured on X4-sized frames, PackBits cuts 1-bit UI screens by
-  80–90 %. A row filter on top of it takes another 30–45 % off for about
-  three more lines of decoder, and deflate takes 50–65 % off PackBits. The
-  biggest win is sending changes against the frame the display holds: a
-  dashboard update drops from 8.4 KB to 0.3 KB. See [compression](#compression).
+- **PackBits stays the only encoding.** Measured on X4-sized frames, it
+  already cuts 1-bit UI screens by 80–90 %. A row filter or deflate would
+  take more off (30–45 % and 50–65 % of what's left), but that's a few
+  Data writes per frame, and not worth a second encoding for now. The
+  measurements are kept in [compression](#compression) in case a grey,
+  colour or fast display changes that.
 - **Three round trips per frame limits the frame rate** far more than
   bandwidth does. A faster mode needs fewer round trips, not a new transport.
 - **Keep refusing to draw on the display.** Vector, template and tile-cache
@@ -310,7 +310,7 @@ two photos. Sizes are in bytes. One Data write carries 508.
 | photo, Atkinson dither | 43,200 | 37,312 | 37,791 | 36,607 | 33,089 | 72,020 | 38,911 |
 
 All of these are without dithering unless stated. "PackBits-up" is the
-proposal below. Deflate is with a 1 KB window, and zstd at level 19 (not a
+row-filter option described below. Deflate is with a 1 KB window, and zstd at level 19 (not a
 candidate, just a reference) is only 10–20 % smaller than deflate.
 
 `gray2` frames are 1.4–1.8 times the size of `mono1` after compression,
@@ -372,9 +372,20 @@ smaller. Either way, the update fits in one or two Data writes, instead of
   PackBits. Deflate makes them 4–8, saving perhaps 50–300 ms of radio per
   frame, depending on the host. That's worth having, but reconnecting costs
   more. The bigger payoffs are deltas (10–30× smaller than a full frame),
-  grey and colour frames (deflate is 2–2.5× smaller than PackBits there), and high frame rates, where every byte counts.
+  grey and colour frames (deflate is 2–2.5× smaller than PackBits there),
+  and high frame rates, where every byte counts.
 
-### Proposed encodings
+### Decision: keep PackBits
+
+PackBits (encoding 1) stays the only encoding. It's already in every host
+and in the X4, its decoder is two counters, and it takes most of the size
+off. Everything below is recorded as measured options, not planned work.
+It's worth revisiting if a display makes the remaining bytes matter: grey
+or colour frames, or a fast LCD mode.
+
+### Options considered
+
+If that happens, these are the designs the measurements point to.
 
 | Code | Name | Decoder | Notes |
 | --- | --- | --- | --- |
@@ -464,19 +475,14 @@ after sending the payload. It's the same as OEPL's `dataVer`, RDP's persistent
 key list and HTTP's `ETag`. A display that reloads a persisted frame after a
 restart reports its CRC too, so regions work across restarts.
 
-### 4. Compression: a row filter, deflate and deltas
+### 4. Compression: keep PackBits
 
-See [compression](#compression) for the measurements. In order:
+Keep PackBits as the only encoding (see [compression](#compression)). For
+small updates, rely on regions, made to work across reconnects by
+`baseCrc` (recommendation 3). The row filter, deflate and the `delta` flag
+are documented as options for later.
 
-1. **`packbits-up` (encoding 2)**: 30–45 % smaller than PackBits on UI, a
-   few lines in the display's existing decoder, and about 30 lines in the host.
-2. **The `delta` flag**, with `baseCrc` and the `frame` caps tag
-   (recommendation 3). This is the largest saving for sleeping dashboards
-   and clocks: an update fits in one or two Data writes.
-3. **`deflate` (encoding 3)**: another third off, at the cost of an
-   inflater on the display. Worth it for grey, colour and faster rates.
-
-Also switch hosts to no dithering for UI content (tab and element capture),
+One change costs nothing on the wire: switch hosts to no dithering for UI content (tab and element capture),
 and keep dithering for images, or add an `auto` mode that dithers only when
 most pixels are mid-greys. It's smaller and crisper.
 
@@ -570,11 +576,11 @@ this). It costs nothing on the wire, and the pairing is a one-time step.
 3. Spec v2 changes while no v2 display has shipped: `baseCrc` (open issue),
    the `frame` caps tag, committing without the final ack, the `sleep` op
    and the wake window.
-4. Add `packbits-up` and the `delta` flag to `js/protocol.js` and
-   `js/sim-display.js`, then the X4. Then `deflate`, and check the
-   inflater's speed and memory on the ESP32-C3.
+4. Default to no dithering for UI capture in the Chrome extension and
+   server.
 5. The rest when a display needs them: pipelining and `rgb444` / indexed
-   for the M5StickS3, slots for slideshows.
+   for the M5StickS3, slots for slideshows, and the compression options if
+   grey, colour or fast frames make the bytes matter.
 
 ## Sources
 
