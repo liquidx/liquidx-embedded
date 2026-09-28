@@ -21,6 +21,12 @@ The short version:
   so the sender can skip a transfer or send a diff against it. This is the
   `baseCrc` open issue in [PROTOCOL.md](PROTOCOL.md#regions-dont-survive-a-reconnect),
   taken a step further.
+- **PackBits already does most of the compression work; the rest is worth
+  having.** Measured on X4-sized frames, PackBits cuts 1-bit UI screens by
+  80–90 %. A row filter on top of it takes another 30–45 % off for about
+  three more lines of decoder, and deflate takes 50–65 % off PackBits. The
+  biggest win is sending changes against the frame the display holds: a
+  dashboard update drops from 8.4 KB to 0.3 KB. See [compression](#compression).
 - **Three round trips per frame limits the frame rate** far more than
   bandwidth does. A faster mode needs fewer round trips, not a new transport.
 - **Keep refusing to draw on the display.** Vector, template and tile-cache
@@ -127,7 +133,7 @@ host already does this (`#last`, `changedRect`).
 What's worth taking: changes are sent as **spans within rows**, not as one
 bounding rectangle. Two small changes far apart (a clock's minutes and a
 battery icon in the opposite corner) cost two small spans, not a rectangle
-covering most of the screen. See [delta encoding](#4-a-delta-encoding-with-skips).
+covering most of the screen. See [deltas](#deltas-against-the-frame-the-display-holds).
 
 ### Stream Deck
 
@@ -279,6 +285,129 @@ Things the survey confirms, and which shouldn't change:
 - Streamable PackBits. It gets fill-rectangles for free: a solid region
   decodes from a couple of bytes per 128.
 
+## Compression
+
+blit v2 hosts already compress: the JS host sends PackBits (encoding 1)
+whenever the display lists it and it saves at least 10 %, and the X4
+decodes it. So the question is what beats PackBits, and what it costs the
+display.
+
+Measured with [`bench/compression/`](bench/compression/), on frames at the
+X4's frame area (716 × 480) made by the host's own rasterizer. The inputs are
+a clock, the X4's home and settings screens, a dashboard, a page of text and
+two photos. Sizes are in bytes. One Data write carries 508.
+
+### 1-bit frames (`mono1`, the X4's default)
+
+| Frame | Raw | PackBits (today) | PackBits-up | LZ4 | deflate | CCITT G4 | heatshrink |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| clock | 43,200 | 4,693 | 2,519 | 2,305 | 1,728 | 997 | 6,388 |
+| X4 home | 43,200 | 4,814 | 2,803 | 2,544 | 1,844 | 940 | 6,530 |
+| X4 settings | 43,200 | 5,304 | 2,902 | 2,731 | 2,055 | 1,434 | 7,030 |
+| dashboard | 43,200 | 8,379 | 5,944 | 5,253 | 3,936 | 3,639 | 8,166 |
+| page of text | 43,200 | 14,176 | 13,310 | 11,265 | 9,166 | 10,434 | 14,520 |
+| photo, no dither | 43,200 | 18,371 | 17,918 | 14,205 | 11,474 | 8,642 | 14,487 |
+| photo, Atkinson dither | 43,200 | 37,312 | 37,791 | 36,607 | 33,089 | 72,020 | 38,911 |
+
+All of these are without dithering unless stated. "PackBits-up" is the
+proposal below. Deflate is with a 1 KB window, and zstd at level 19 (not a
+candidate, just a reference) is only 10–20 % smaller than deflate.
+
+`gray2` frames are 1.4–1.8 times the size of `mono1` after compression,
+not twice, and the ratios between codecs are about the same: X4 home is
+6,943 PackBits, 4,694 PackBits-up and 2,999 deflate. Colour (`rgb565`) UI at
+this size is 23–62 KB with PackBits and 9–25 KB with deflate. A 32 KB window
+matters there, because each row is 1.4 KB.
+
+### Deltas against the frame the display holds
+
+An update XORed with the frame the display holds is zero wherever nothing
+changed, so it compresses to almost nothing. The measured updates: the
+clock going from 12:34 to 12:35, and the dashboard with four values changed
+in different places (the time, two readings and a label).
+
+| Update | Full frame, PackBits | Bounding region, PackBits | Region, deflate | XOR, PackBits | XOR, PackBits-up | XOR, deflate |
+| --- | --- | --- | --- | --- | --- | --- |
+| clock, `mono1` | 4,621 | 649 (72 × 101) | 177 | 1,527 | 555 | 435 |
+| dashboard, `mono1` | 8,380 | 1,960 (416 × 111) | 965 | 924 | 308 | 294 |
+| dashboard, `gray2` | 12,795 | 3,230 (408 × 111) | 1,664 | 1,731 | 488 | 479 |
+
+When the change is in one place, a tight region is best. When changes are
+scattered, the bounding box covers most of them and a delta is 3–6 times
+smaller. Either way, the update fits in one or two Data writes, instead of
+10–17 for a full frame.
+
+### What the numbers say
+
+- **Heatshrink** (LZSS, popular on MCUs) is *worse* than PackBits on UI.
+  Its matches are capped at 16 bytes, so long white runs still cost about a
+  bit per byte, where PackBits spends 2 bytes per 128.
+- **PackBits with a row filter** ("PackBits-up") is the cheap win: XOR each
+  byte with the one above it, so repeated rows and vertical edges become
+  zeros. It's 30–45 % smaller than PackBits on UI screens (6 % on a page
+  of text) and needs no memory, since
+  the row above is already decoded. It does worse on dithered photos, so the
+  host picks per frame, as it already does between PackBits and none.
+- **Deflate** is another third smaller than PackBits-up, and the best
+  general choice. Its window barely matters for 1-bit and 2-bit frames: 512
+  bytes (5 rows of `mono1`) is within about 3 % of 32 KB, because the useful
+  matches are a row or two up. Hosts get it for free (`zlib` in Node,
+  `CompressionStream('deflate-raw')` in browsers). The cost is a real decoder
+  on the display, a few KB of code, and decoder state.
+- **CCITT G4** (fax, the family OpenEPaperLink's G5 comes from) is the best
+  on clean 1-bit UI, down to half the size of deflate. But it's larger than deflate
+  on dense text, *larger than raw* on dithered images, `mono1` only, and
+  browsers have no encoder for it. It only makes sense later, as a
+  `mono1` extra for displays that mostly show dashboards.
+- **LZ4** has the simplest real LZ decoder, but it lands between PackBits-up
+  and deflate, and hosts would need an encoder. Deflate is the better step up.
+- **Dithering costs more than any codec saves.** A dithered photo is almost
+  incompressible (31–37 KB of 43 KB whatever the codec). For UI, dithering
+  anti-aliased text adds about 10 % with deflate, and up to 60 % with G4. The Chrome extension and the
+  server default to Atkinson, which is the right call for photos and the
+  wrong one for UI. For photos, an undithered `gray2` frame deflates to 18 KB,
+  about half a dithered `mono1` one, if the display's grey refresh is
+  acceptable.
+- **In time**, the X4's 1-bit screens are already 10–17 Data writes with
+  PackBits. Deflate makes them 4–8, saving perhaps 50–300 ms of radio per
+  frame, depending on the host. That's worth having, but reconnecting costs
+  more. The bigger payoffs are deltas (10–30× smaller than a full frame),
+  grey and colour frames (deflate is 2–2.5× smaller than PackBits there), and high frame rates, where every byte counts.
+
+### Proposed encodings
+
+| Code | Name | Decoder | Notes |
+| --- | --- | --- | --- |
+| 0 | none | | |
+| 1 | `packbits` | 2 counters | As now |
+| 2 | `packbits-up` | 2 counters | PackBits, then each decoded byte is XORed with the decoded byte one row above (row 0 as is). Plus `0x80 u16 n`: `n + 1` zero bytes. `0x80` is a no-op in PackBits, so the code is free. |
+| 3 | `deflate` | an inflater that can stop at the end of a Data write and resume with the next (miniz's `tinfl` works this way) | Raw deflate (RFC 1951). Caps say the largest window the display accepts. |
+
+And one header flag, orthogonal to the encoding:
+
+- **`delta`** (flags bit 3): the decoded bytes are XORed onto the frame
+  (or region) the display holds instead of replacing it. Needs `baseCrc` to
+  match, like regions, and error 9 otherwise. Zero bytes leave pixels
+  unchanged, so any encoding with cheap zero runs is a delta encoding.
+
+This replaces the separate skip op considered earlier (under XOR, a skip is just a run
+of zeros), and it combines with regions: a delta region of just the digits
+that changed.
+
+The decoder stays inside principle 2. The X4 already decodes into a
+contiguous receive buffer (`rx_`), so the row above and deflate's whole
+window are already in memory. A 32 KB window costs it nothing, and the browser's
+built-in deflater can be used as is. A display that decodes straight into a
+panel-width frame buffer declares a small window (9–10 bits) and keeps a ring
+of that size, and hosts use `zlib` (Node) or pako (browsers), which let
+the window be set. Deflate is bit-oriented, so principle 2's "a byte at a
+time" becomes "chunk by chunk", which is all the display needs anyway.
+
+Caps: the `encodings` list already says which codes a display takes. Deflate
+also needs its window size: a new tag, or one byte after the code in the
+list. Hosts try the encodings a display lists, keep the smallest, and fall
+back to none as now.
+
 ## Recommendations
 
 In order of payoff for the X4 and similar displays. The first two don't
@@ -335,24 +464,21 @@ after sending the payload. It's the same as OEPL's `dataVer`, RDP's persistent
 key list and HTTP's `ETag`. A display that reloads a persisted frame after a
 restart reports its CRC too, so regions work across restarts.
 
-### 4. A delta encoding with skips
+### 4. Compression: a row filter, deflate and deltas
 
-Bounding-rectangle regions do badly with scattered changes. A span-based
-delta (like DisplayLink) handles any pattern, and it's a small addition to
-PackBits:
+See [compression](#compression) for the measurements. In order:
 
-- New encoding `2` (`packbits-delta`), only valid with a `baseCrc` that
-  matches the frame the display holds.
-- The same ops as PackBits, plus `0x80 u16 n`: skip `n + 1` bytes, keeping
-  the base's bytes. (`0x80` is a no-op in PackBits, so decoders already
-  reserve it.)
-- It decodes in place into the frame buffer, a byte at a time, like
-  PackBits. The decoded length (skips included) must equal the frame size.
+1. **`packbits-up` (encoding 2)**: 30–45 % smaller than PackBits on UI, a
+   few lines in the display's existing decoder, and about 30 lines in the host.
+2. **The `delta` flag**, with `baseCrc` and the `frame` caps tag
+   (recommendation 3). This is the largest saving for sleeping dashboards
+   and clocks: an update fits in one or two Data writes.
+3. **`deflate` (encoding 3)**: another third off, at the cost of an
+   inflater on the display. Worth it for grey, colour and faster rates.
 
-An unchanged frame is `0x80 ff ff` repeated: a few bytes. A clock with two
-changed digits and a battery icon is three short literals and a few skips,
-about the same as one tight region, and with no alignment rules. Regions stay
-for hosts that already use them. This makes `hold` rarely needed.
+Also switch hosts to no dithering for UI content (tab and element capture),
+and keep dithering for images, or add an `auto` mode that dithers only when
+most pixels are mid-greys. It's smaller and crisper.
 
 ### 5. Nothing to send: let the display sleep again
 
@@ -444,8 +570,9 @@ this). It costs nothing on the wire, and the pairing is a one-time step.
 3. Spec v2 changes while no v2 display has shipped: `baseCrc` (open issue),
    the `frame` caps tag, committing without the final ack, the `sleep` op
    and the wake window.
-4. Try `packbits-delta` in `js/protocol.js` and `js/sim-display.js` and
-   compare its sizes with regions on recorded dashboards.
+4. Add `packbits-up` and the `delta` flag to `js/protocol.js` and
+   `js/sim-display.js`, then the X4. Then `deflate`, and check the
+   inflater's speed and memory on the ESP32-C3.
 5. The rest when a display needs them: pipelining and `rgb444` / indexed
    for the M5StickS3, slots for slideshows.
 
@@ -460,6 +587,7 @@ this). It costs nothing on the wire, and the pairing is a one-time step.
 - [TRMNL display API](https://docs.trmnl.com/go/private-api/screens), [TRMNL firmware](https://github.com/usetrmnl/trmnl-firmware)
 - [Flipper Zero protobuf bindings](https://github.com/flipperdevices/flipperzero_protobuf_py)
 - [Pebble: displaying remote images](https://developer.rebble.io/blog/2014/10/29/Displaying-remote-images/), [AppMessage](https://developer.rebble.io/docs/c/Foundation/AppMessage/)
+- [RFC 1951: DEFLATE](https://www.rfc-editor.org/rfc/rfc1951), [CompressionStream](https://developer.mozilla.org/en-US/docs/Web/API/CompressionStream)
 - [TI BLE5-Stack: L2CAP connection-oriented channels](https://software-dl.ti.com/lprf/simplelink_cc2640r2_sdk/1.35.00.33/exports/docs/ble5stack/ble_user_guide/html/ble-stack/l2cap.html)
 - From general knowledge rather than fetched for this note: RDP caching,
   DisplayLink's `udlfb` driver, Stream Deck HID reports, Espruino/Gadgetbridge,
