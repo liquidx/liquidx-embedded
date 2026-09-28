@@ -10,7 +10,7 @@ that every host still has to speak. [Compatibility with v1](#compatibility-with-
 lists the differences.
 
 Settings, Wi-Fi, actions and files are out of scope on purpose: they belong
-to the sister protocol [bloc](../bloc/PROTOCOL.md), which a display can speak
+to the sister protocol [blat](../blat/PROTOCOL.md), which a display can speak
 alongside blit.
 
 | Term | Meaning |
