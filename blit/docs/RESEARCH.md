@@ -19,7 +19,7 @@ The short version:
 - **The display should say what it already holds.** OpenEPaperLink, RDP's
   persistent cache, TRMNL and Mosh all identify the receiver's current state,
   so the sender can skip a transfer or send a diff against it. This is the
-  `baseCrc` open issue in [PROTOCOL.md](PROTOCOL.md#regions-dont-survive-a-reconnect),
+  `baseCrc` open issue in [PROTOCOL.md](../PROTOCOL.md#regions-dont-survive-a-reconnect),
   taken a step further.
 - **PackBits stays the only encoding.** Measured on X4-sized frames, it
   already cuts 1-bit UI screens by 80–90 %. A row filter or deflate would
@@ -292,8 +292,8 @@ whenever the display lists it and it saves at least 10 %, and the X4
 decodes it. So the question is what beats PackBits, and what it costs the
 display.
 
-Measured with [`bench/compression/`](bench/compression/), on frames at the
-X4's frame area (716 × 480) made by the host's own rasterizer. The inputs are
+Measured with a one-off script (not kept in the repo) on frames at the
+X4's frame area (716 × 480), made by the host's own rasterizer (`js/raster.js`). The inputs are
 a clock, the X4's home and settings screens, a dashboard, a page of text and
 two photos. Sizes are in bytes. One Data write carries 508.
 
@@ -522,7 +522,7 @@ For LCDs that refresh in milliseconds, with the changes above:
   ContinuousUpdates gets in RFB. E-paper displays leave it at 1.
 - Keep `minIntervalMs` as the rate cap. The host adds a latest-wins
   queue: when the link falls behind, frames are dropped, not delayed.
-- Use the [stream transport](PROTOCOL.md#stream-transports) over an L2CAP
+- Use the [stream transport](../PROTOCOL.md#stream-transports) over an L2CAP
   channel where the host can open one (Android, iOS, native desktop, not Web
   Bluetooth), with credits replacing the `window` acks.
 

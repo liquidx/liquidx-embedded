@@ -6,7 +6,7 @@ display's button presses back. The host does all the rendering, and the
 display just copies bytes to its panel.
 
 - **[PROTOCOL.md](PROTOCOL.md)**: the spec, with its design principles.
-- **[RESEARCH.md](RESEARCH.md)**: how blit compares with other remote-screen
+- **[docs/RESEARCH.md](docs/RESEARCH.md)**: how blit compares with other remote-screen
   protocols (VNC, RDP, Bluetooth ESL, OpenEPaperLink, TRMNL, ...) and what to
   take from them.
 - **[js/](js/)**: the host library (Web Bluetooth), and a simulated display.
