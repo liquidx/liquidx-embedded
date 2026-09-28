@@ -19,7 +19,7 @@ other, with implementations for several hosts. These use a plain name.
 | Folder | What | Notes |
 | --- | --- | --- |
 | [`blit/`](blit/) | [blit protocol](blit/PROTOCOL.md): pixels to low-power displays over BLE, button presses back | JS host library, web demo, Chrome extension, simulated display. The X4 is a display. |
-| [`knob/`](knob/) | [knob](knob/DESIGN.md): a control plane over BLE: settings, Wi-Fi, actions and files, described by the device | Design draft, not implemented yet. |
+| [`bloc/`](bloc/) | [bloc](bloc/PROTOCOL.md): Bluetooth LE Operation and Control: settings, Wi-Fi, actions and files, declared by the device firmware. Sister to blit | Design draft, not implemented yet. |
 
 ## Conventions
 

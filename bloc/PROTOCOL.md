@@ -1,18 +1,27 @@
-# knob: a control plane for small devices over BLE
+# The bloc protocol
 
-**Status: design draft.** Nothing here is implemented yet. "knob" is a
-working name.
+**bloc** (**B**luetooth **L**E **O**peration and **C**ontrol) is a control
+plane for small devices over BLE.
 
-knob lets a **host** (a browser, a phone, a server) see and change what a
+**Status: design draft.** Nothing here is implemented yet.
+
+bloc lets a **host** (a browser, a phone, a server) see and change what a
 small **device** exposes: its settings, its Wi-Fi credentials, actions like
 "reboot" or "scan for networks", forms for data input, and files. The device
 describes its own controls, so one generic host UI works for every device,
 and a device gets a settings page without anyone writing one for it.
 
-It's the sibling of [blit](../blit/PROTOCOL.md). blit moves pixels; knob
-moves configuration. They share the transport style, the flow control and
-the principles, so the code on both sides can be shared too. A device can
-speak both.
+**What's exposed is decided in the firmware.** The device's schema is its
+exposure policy: a control that isn't in it doesn't exist over the air, and
+each one that is carries its own access level. Hosts, including the
+[server](#server-and-web-interface), know nothing about a device beyond what
+it declares, and add no policy of their own.
+
+It's a sister protocol to [blit](../blit/PROTOCOL.md), and deliberately a
+separate one, so blit stays small. blit moves pixels; bloc moves
+configuration. They share the transport style, the flow control and the
+principles, so the code on both sides can be shared, and a device can speak
+both. Neither needs the other.
 
 | Term | Meaning |
 | --- | --- |
@@ -20,7 +29,8 @@ speak both.
 | **Host** | What controls it. BLE central, GATT client. |
 | **Control** | One thing the device exposes: a setting, a read-only value, an action, a file slot. |
 | **Schema** | The device's list of controls, with types, limits and labels. |
-| **Bridge** | A host that relays knob to other clients (over WebSocket), applying a policy on the way. See [Server and web interface](#server-and-web-interface). |
+| **Access level** | How trusted a connection must be to read or write a control. Declared per control by the device. See [access levels](#access-levels). |
+| **Bridge** | A host that relays bloc to other clients (over WebSocket). See [Server and web interface](#server-and-web-interface). |
 
 All integers are little-endian.
 
@@ -43,7 +53,7 @@ Web Bluetooth.
 | **ESPHome entities** (native API is TCP, not BLE) | A device declares entities: switch, number, select, text, button, sensor. Home Assistant renders them. | Not over BLE. But it's the proof that a small set of typed entities covers almost everything, and the [control types](#control-types) below follow it. |
 | **Nordic UART Service** | A serial pipe over GATT. | A pipe, not a protocol. Fine as a debug fallback. |
 
-**Recommendation:** write knob, but small, and steal:
+**Recommendation:** write bloc, but small, and steal:
 
 - the **entity model** from ESPHome and HomeKit (typed controls with ranges
   and units),
@@ -52,7 +62,7 @@ Web Bluetooth.
 - the **security** from ESP-IDF `security2` / Matter (a PAKE keyed by a code
   the user reads off the device), as a later step,
 - and **defer firmware updates** to SMP/MCUboot or ESP-IDF OTA rather than
-  inventing a bootloader story. A knob `file` control can carry an image, but
+  inventing a bootloader story. A bloc `file` control can carry an image, but
   verifying and swapping images is a separate problem those already solve.
 
 ## Principles
@@ -60,42 +70,48 @@ Web Bluetooth.
 blit's principles carry over. The ones that change the design:
 
 1. **The device declares, the host renders.** The device publishes a schema:
-   every control's type, range, unit, label and help text. A host that knows
-   nothing about the device can still show a complete, validated settings
-   page. Hosts may special-case [well-known keys](#well-known-keys) (a
-   proper Wi-Fi picker) but never *need* to.
-2. **The device enforces.** Ranges, read-only flags, secrets and access
-   levels are checked on the device on every write. What a host or bridge
-   hides is a convenience, not security: anyone in radio range can write
-   GATT directly.
-3. **Binary, fixed headers, TLV for anything that grows.** Same as blit.
+   every control's type, range, unit, label and help text, and who may read
+   and write it. A host that knows nothing about the device can still show a
+   complete, validated settings page. Hosts may special-case
+   [well-known keys](#well-known-keys) (a proper Wi-Fi picker) but never
+   *need* to.
+2. **The firmware is the policy.** Which controls exist over the air, and at
+   what access level, is compiled into the firmware (see
+   [declaring controls](#declaring-controls-in-firmware)). There is no
+   host-side list of what to expose, so there's nothing to keep in step with
+   the firmware, and every host sees the same device.
+3. **The device enforces.** Ranges, read-only flags, secrets and access
+   levels are checked on the device on every request. Hosts hide what a
+   connection can't use as a courtesy, not as security: anyone in radio
+   range can write GATT directly.
+4. **Binary, fixed headers, TLV for anything that grows.** Same as blit.
    Unknown TLV tags are skipped, reserved bytes are 0.
-4. **Every message fits one ATT write or notification.** Anything bigger (the
+5. **Every message fits one ATT write or notification.** Anything bigger (the
    schema, a file, a directory listing) goes through a
    [transfer](#transfers) with blit's chunk and window flow control.
-5. **Idle is free.** No keepalives. Values the host cares about are pushed as
+6. **Idle is free.** No keepalives. Values the host cares about are pushed as
    events when they change. The device only listens when it's in
    [listening mode](#listening-mode).
-6. **Secrets go in, never out.** A secret can be written but never read back,
+7. **Secrets go in, never out.** A secret can be written but never read back,
    logged, or included in an event. Hosts learn only whether it's set.
-7. **Keys are stable, ids are cheap.** Every control has a stable string key
-   (`wifi.ssid`) that hosts and policies use, and a small numeric id used on
+8. **Keys are stable, ids are cheap.** Every control has a stable string key
+   (`wifi.ssid`) that hosts use, and a small numeric id used on
    the wire. Ids only need to be stable for one schema version; keys forever.
 
 ## Transport: Bluetooth LE GATT
 
 One primary service, with the same shape as blit's:
 
-Service `c7a10000-e295-445e-b079-edd9ea2725cb`
+Service `b10c0000-e295-445e-b079-edd9ea2725cb`
 
 | Characteristic | UUID | Properties | Direction | Purpose |
 | --- | --- | --- | --- | --- |
-| Info | `c7a10001-…` | read | device → host | [Info](#info): identity, limits, schema CRC |
-| Request | `c7a10002-…` | write | host → device | [Requests](#requests) |
-| Reply | `c7a10003-…` | notify | device → host | Replies to requests, and transfer acks |
-| Data | `c7a10004-…` | write without response | host → device | Transfer chunks, host to device (uploads) |
-| DataOut | `c7a10005-…` | notify | device → host | Transfer chunks, device to host (schema, downloads) |
-| Event | `c7a10006-…` | notify | device → host | [Events](#events): value changes, action progress |
+| Info | `b10c0001-…` | read | device → host | [Info](#info): identity, limits, schema CRC |
+| Request | `b10c0002-…` | write | host → device | [Requests](#requests) |
+| Reply | `b10c0003-…` | notify | device → host | Replies to requests, and transfer acks |
+| Data | `b10c0004-…` | write without response | host → device | Transfer chunks, host to device (uploads) |
+| DataOut | `b10c0005-…` | notify | device → host | Transfer chunks, device to host (schema, downloads) |
+| Event | `b10c0006-…` | notify | device → host | [Events](#events): value changes, action progress |
 
 (The `…` is the rest of the service UUID.)
 
@@ -105,13 +121,13 @@ require 2M PHY. Requests are at most 244 bytes, and devices accept Long
 Writes for them.
 
 **Advertising.** A 128-bit service UUID takes 18 of the 31 advertising bytes,
-so the advertisement carries flags and the knob UUID, and the scan response
+so the advertisement carries flags and the bloc UUID, and the scan response
 carries the name and a service data record with the device state:
 
 | Byte | Field |
 | --- | --- |
 | 0 | `state`: bit 0 unprovisioned (no Wi-Fi yet), bit 1 pairing open (accepting new hosts), bit 2 has bonds, bit 3 also speaks blit |
-| 1 | knob version |
+| 1 | bloc version |
 
 A device that also speaks blit advertises one of the two UUIDs (whichever
 is its main job) and sets bit 3. Hosts find the other service by GATT
@@ -163,7 +179,7 @@ A version byte, then TLV records (`u8 tag, u8 length, value`), as blit caps.
 | Tag | Name | Value | Default |
 | --- | --- | --- | --- |
 | 0x01 | `name` | UTF-8, ≤ 32 bytes. The user's name for this device. | none |
-| 0x02 | `model` | UTF-8, ≤ 32. e.g. `xteink-x4`. Bridges key policies on it. | none |
+| 0x02 | `model` | UTF-8, ≤ 32. e.g. `xteink-x4`. Hosts may group devices by it. | none |
 | 0x03 | `firmware` | UTF-8, ≤ 32. e.g. `1.4.0+g3c1f2e` | none |
 | 0x04 | `deviceId` | 8 bytes, stable across renames and reflashes (e.g. from the MAC or eFuse) | none |
 | 0x05 | `schema` | `u32 crc, u32 size`: CRC-32 of the schema blob, and its size | required |
@@ -331,10 +347,10 @@ constant: it's generated once, at build time or at boot, never per request.
 ### Mapping the X4's settings
 
 The X4's `settings::Choice` (in
-[`Settings.h`](../xteink-x4-platformio/src/Settings.h)) is already a knob
+[`Settings.h`](../xteink-x4-platformio/src/Settings.h)) is already a bloc
 `enum`:
 
-| `Choice` field | knob |
+| `Choice` field | bloc |
 | --- | --- |
 | `key` (`"refresh"`) | `key` (`display.refresh`) |
 | `title` / `heading` | `label` |
@@ -342,14 +358,13 @@ The X4's `settings::Choice` (in
 | `options[].value`, `options[].list` | `option` records |
 | `defaultIndex` | `default` (the option's value) |
 
-So the X4 could serve its whole settings page over knob by walking `kAll`,
+So the X4 could serve its whole settings page over bloc by walking `kAll`,
 with no new UI code. `live` on each would keep a host in step when someone
 changes a setting on the device itself.
 
 ### Well-known keys
 
-Hosts may give these a better UI, and bridges may give them default
-policies. A device uses the ones that apply, with these types.
+Hosts may give these a better UI. A device uses the ones that apply, with these types.
 
 | Key | Type | Notes |
 | --- | --- | --- |
@@ -493,7 +508,57 @@ whose reply is the Info TLVs.
 This is what makes a bridge simple: it speaks BLE to the device and this
 framing, over WebSocket, to browsers.
 
+## Declaring controls in firmware
+
+The schema is generated from one table in the firmware. That table is the
+device's whole exposure policy: settings, values and actions the firmware
+has but doesn't list are unreachable over BLE. A sketch for the X4, reusing
+its existing `settings::Choice` definitions:
+
+```cpp
+// src/ble/BlocControls.cpp: everything the X4 exposes over bloc.
+using namespace bloc;
+
+constexpr Control kControls[] = {
+    group("display", "Display"),
+    choice("display.refresh", settings::kRefresh, Access{0, 1}, kLive),
+    choice("display.frameSleep", settings::kFrameSleep, Access{0, 1}, kLive),
+
+    group("power", "Power"),
+    choice("power.sleep", settings::kSleep, Access{0, 1}, kLive),
+    readout("power.battery", "Battery", Unit::Percent, Access{0}, kLive),
+
+    group("files", "Images"),
+    dir("files.images", "/images", ".bmp,.png", Access{1, 2}),
+
+    action("system.restart", "Restart", Access{2}, kConfirm),
+};
+// settings::kClock isn't listed, so hosts can't see or change it.
+```
+
+- `Access{read, write}` gives the [access levels](#access-levels); a single
+  level is read-only. So the exposure of each control is one of: absent
+  (not in the table), read-only, or read-write, each at a level.
+- The schema blob and its CRC are built from the table at compile time, or
+  once at boot, and live in flash. No per-connection work.
+- Well-known keys get their types checked at compile time where the
+  language allows it, so a firmware can't publish `wifi.password` as plain
+  `text`.
+
+**Exposure that changes at runtime.** A device may expose different controls
+in different states: `system.firmware` only while on external power, or
+everything read-only while a "lock" setting is on. It does that by building
+from a different table (or masking entries), which changes the schema CRC
+and sends a `schema` event. Hosts just re-read. This should be rare; for
+"sometimes you can't do this" a `busy` or `not permitted` status is usually
+simpler.
+
 ## Server and web interface
+
+The server is a **dumb bridge and renderer**. It knows how to speak bloc and
+how to draw each [control type](#control-types). It doesn't know what any
+device can do until the device tells it, and it keeps no list of what to
+expose: that came from the firmware.
 
 Two ways to drive a device, sharing one JS library (a `protocol.js` and a
 simulated device, like blit's `js/`):
@@ -502,12 +567,11 @@ simulated device, like blit's `js/`):
  (a) one person, one device, nothing to run
      browser ── Web Bluetooth ──► device
 
- (b) a server near the devices, many users, a policy
-     browser ── HTTPS / WebSocket ──► knob server ── BLE (noble) ──► devices
+ (b) a server near the devices
+     browser ── HTTPS / WebSocket ──► bloc server ── BLE (noble) ──► devices
                                        │
-                                       ├─ device registry
+                                       ├─ device list (seen, bonded)
                                        ├─ schema cache (by CRC)
-                                       ├─ exposure policy
                                        └─ audit log
 ```
 
@@ -515,48 +579,25 @@ simulated device, like blit's `js/`):
 get a form. It needs Chrome or Edge (desktop or Android); Safari and iOS
 have no Web Bluetooth.
 
-(b) is the case the policy question is about. The server sits where
-[`blit/server`](../blit/server/) does (a Pi or Mac mini with a Bluetooth
-adapter), keeps a connection or reconnects on demand, and serves the web UI.
+(b) puts a server where [`blit/server`](../blit/server/) runs (a Pi or Mac
+mini with a Bluetooth adapter). It connects to devices on demand, and
+relays bloc to browsers over WebSocket using the
+[stream framing](#stream-transports). The browser runs the same page as in
+(a), with a WebSocket instead of Web Bluetooth underneath, so there's one UI
+to build.
 
-### Controlling what's exposed
+**Access levels through a bridge.** The device sees one connection, the
+server's, at whatever level the server's bond gets (normally 2). By default
+every browser user of the server gets that level too, which suits a server
+on a home network behind a login. If some users should get less, the server
+can cap a user at a lower level; it then hides and rejects controls using
+the levels **the device declared**. That's the only setting the server has, and
+it's about people, not controls: the server still never decides what a
+control's level is.
 
-The device publishes everything it has. The server decides which of it each
-user sees. The policy is keyed by **control key**, not id, so it survives
-firmware updates, and set at two levels:
-
-1. **Per model** (`xteink-x4`): the default for every device of that kind.
-2. **Per device** (`deviceId`): overrides.
-
-For each key the admin picks:
-
-| Setting | Values |
-| --- | --- |
-| Exposure | hidden · read-only · read-write |
-| Who | roles or users allowed (e.g. `admin`, `family`) |
-| Confirm | force a confirmation, beyond the device's own `confirm` flag |
-| Label | override the device's label, e.g. "Kitchen display refresh" |
-
-New keys the server hasn't seen before (a firmware update added them) are
-**hidden** until an admin exposes them, except `readOnly` controls at
-access level 0, which default to read-only. Secrets and actions never
-default to exposed.
-
-The server enforces the policy, not just the UI:
-
-- It **filters the schema** it gives each client: hidden controls are
-  removed, read-only ones get the `readOnly` flag added.
-- It **rejects requests** (`set`, `invoke`, transfers) on controls the
-  client can't write, with status 7, before they reach the device.
-- It **filters events**, so hidden values don't leak through `changed`.
-
-That's the bridge in the table at the top: to a browser it speaks knob over
-WebSocket, a narrower device than the real one. The same web UI works in (a)
-and (b), because the filtered schema is still a schema.
-
-(The device-side access levels still apply. The server is one host among
-several; someone with a phone next to the device isn't bound by its policy.
-So anything sensitive also needs a device access level of 2.)
+The server stores nothing about devices that it can't rebuild by
+reconnecting: its schema cache is keyed by CRC, and a firmware update
+that changes what's exposed simply shows up as a new schema.
 
 ### Pages
 
@@ -566,10 +607,7 @@ So anything sensitive also needs a device access level of 2.)
   widget (see [control types](#control-types)); `live` values update in
   place; actions show progress; `file` and `dir` controls get drop zones and
   lists. Well-known keys get special UI (a Wi-Fi network picker driven by
-  `wifi.scan`).
-- **Exposure (admin):** a table of every key for a model, with the device's
-  label, type and access level beside the policy columns above. Per-device
-  overrides on the same table. A preview of what a given role sees.
+  `wifi.scan`). Controls above the user's level are left out.
 - **Audit:** who changed what, when, from which client. Secrets recorded as
   "changed", never their value.
 
@@ -582,10 +620,11 @@ In order; each step is usable by itself.
    schema. Tests like `blit/js/test`.
 2. **Web Bluetooth page** with the generic form renderer. Works against the
    simulated device first.
-3. **X4 firmware**: expose `settings::Choice` as `enum` controls, with `live`.
-   A second GATT service next to `CastServer`.
-4. **Server**: BLE bridge (from `blit/server`), policy store (a JSON or
-   SQLite file), the pages above.
+3. **X4 firmware**: the [controls table](#declaring-controls-in-firmware),
+   exposing `settings::Choice` as `enum` controls with `live`. A second GATT
+   service next to `CastServer`.
+4. **Server**: BLE bridge (from `blit/server`), WebSocket relay, the pages
+   above.
 5. **Files**: `dir` control for the X4's SD images.
 6. **Wi-Fi**: on an ESP32 that uses it (the M5StickS3), with `wifi.scan` and
    `wifi.connect`.
@@ -593,15 +632,12 @@ In order; each step is usable by itself.
 
 ## Open questions
 
-- **Where does the policy live?** The design above keeps it on the server.
-  The alternative is to write it to the device (an admin-only `knob.exposed`
-  control listing keys), so every host sees the same subset, but then it's
-  the device enforcing someone's UI preferences with its flash.
-- **One service or two?** knob and blit could merge into one service with
-  blit's messages as another op range. Separate is simpler to ship; merged
-  saves a UUID in the advertisement.
+- **Changing exposure without reflashing.** The table is compiled in, so
+  exposing one more setting means a firmware update. If that gets tedious,
+  an admin-only (level 2) control could narrow the table at runtime (hide
+  or make read-only), but never widen it past what the firmware declares.
 - **SMP compatibility.** Adopting SMP's 8-byte header (and adding a
-  "schema" group) would let knob devices talk to existing MCUmgr tools for
+  "schema" group) would let bloc devices talk to existing MCUmgr tools for
   firmware and files. It costs CBOR on the device.
 - **Multiple hosts at once.** BLE peripherals can take several connections.
   Events already keep hosts in step; `set` needs no locking because it's
