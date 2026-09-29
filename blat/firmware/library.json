@@ -1,0 +1,12 @@
+{
+  "name": "blat",
+  "version": "0.1.0",
+  "description": "Device side of blat (BLE Attributes Transfer): settings, actions and pairing over BLE, declared in one table.",
+  "keywords": ["ble", "settings", "nimble"],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src"
+  }
+}

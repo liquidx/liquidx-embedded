@@ -3,7 +3,10 @@
 **blat** (**BL**E **A**ttributes **T**ransfer) is a control
 plane for small devices over BLE.
 
-**Status: design draft.** Nothing here is implemented yet.
+**Status: draft.** The device side is implemented as a library
+([`firmware/`](firmware/)), used by the X4 for its settings; no host
+implements it yet beyond the Python one in its tests. See
+[Implementations](#implementations).
 
 blat lets a **host** (a browser, a phone, a server) see and change what a
 small **device** exposes: its settings, its Wi-Fi credentials, actions like
@@ -127,18 +130,18 @@ Extension, a 15–30 ms connection interval while a host is active, don't
 require 2M PHY. Requests are at most 244 bytes, and devices accept Long
 Writes for them.
 
-**Advertising.** A 128-bit service UUID takes 18 of the 31 advertising bytes,
-so the advertisement carries flags and the blat UUID, and the scan response
-carries the name and a service data record with the device state:
+**Advertising.** A 128-bit service UUID takes 18 of the 31 advertising
+bytes. The blat UUID goes in the advertisement or, when that's full, the
+scan response; hosts scan actively, so they see either. The X4 advertises
+blit's UUID and its name, and puts blat's in the scan response.
+
+A device may also put a service data record in the scan response, when
+there's room, with its state:
 
 | Byte | Field |
 | --- | --- |
 | 0 | `state`: bit 0 unprovisioned (no Wi-Fi yet), bit 1 `acceptingHosts` (will show a code), bit 2 has remembered hosts, bit 3 also speaks blit |
 | 1 | blat version |
-
-A device that also speaks blit advertises one of the two UUIDs (whichever
-is its main job) and sets bit 3. Hosts find the other service by GATT
-discovery after connecting.
 
 ## Session
 
@@ -247,6 +250,11 @@ Notified on Reply:
 | 3 | 1 | `flags`: bit 0 `more` (the body was cut off; ask again) |
 | 4 | 2 | `detail`: which id failed, or an expected value, per status |
 | 6 | n | body, per op |
+
+A body that doesn't fit in one notification is left out: the reply has an
+empty body and `more` set. For `get` and `options` the device cuts the list
+itself instead and sets `more` (the host asks for the rest). For `hello`
+it means "read Info instead", which happens at the default MTU of 23.
 
 A **transfer ack** (device acking host uploads, like blit's `ack`) is
 `op = 0x80, seq = transferId, status = 0, flags = 0, detail = 0`, then
@@ -507,9 +515,12 @@ host                                        device
 1. **auth-begin** with method 1. The device makes a random code of `digits`
    digits (6 by default), shows it, and replies with a random 16-byte
    `salt`. A code lasts `expiresSeconds` (120) and allows `attemptsLeft`
-   (3) tries; after that the host has to ask for a new one. The device may
-   require a button press before it shows a code, and refuses while it
-   isn't [accepting new hosts](#listening-mode).
+   (3) tries; after that the host has to ask for a new one. Asking again
+   while a code is showing returns **the same code** and salt, with the
+   time and tries it has left, so a host can't skip to a fresh code (and
+   fresh tries) whenever it likes. The device may require a button press
+   before it shows a code, and refuses while it isn't
+   [accepting new hosts](#listening-mode).
 2. The user enters the code, or scans the [QR code](#the-qr-code).
 3. **SPAKE2** (RFC 9382) on P-256, with SHA-256, HKDF and HMAC:
    - `w = SHA-256("blat code" ‖ salt ‖ code as ASCII digits) mod n`.
@@ -519,6 +530,18 @@ host                                        device
    - `auth-code` carries `pA`; its reply carries `pB` and the device's key
      confirmation `confirmB`; `auth-confirm` carries the host's `confirmA`.
      Points are uncompressed SEC1 (65 bytes).
+   - In full, with M and N the P-256 points from RFC 9382 section 6 and
+     `len(x)` the length of `x` as a u64 little-endian:
+     - A picks random `x`: `pA = x·G + w·M`. B picks random `y`:
+       `pB = y·G + w·N`.
+     - A: `K = x·(pB − w·N)`. B: `K = y·(pA − w·M)`. B refuses a `pA`
+       that isn't on the curve.
+     - `TT = len(A)‖A ‖ len(B)‖B ‖ len(pA)‖pA ‖ len(pB)‖pB ‖ len(K)‖K ‖ len(w)‖w`,
+       with `K` uncompressed and `w` as 32 big-endian bytes.
+     - `Ke ‖ Ka = SHA-256(TT)`, 16 bytes each.
+     - `KcA ‖ KcB = HKDF-SHA256(salt: none, Ka, "ConfirmationKeys" ‖ AAD)`,
+       32 bytes, 16 each.
+     - `confirmA = HMAC-SHA256(KcA, TT)`, `confirmB = HMAC-SHA256(KcB, TT)`.
    - A wrong code shows up as a bad `confirmA`. The device replies status 16
      with the attempts left. A host that gets a bad `confirmB` stops: it's
      talking to something that doesn't know the code.
@@ -530,9 +553,15 @@ host                                        device
    each.
 
 Six digits and three tries per code is a 1 in 333,333 chance per code, and
-every code needs someone in range to ask for it. After three codes in a row
-fail, the device refuses new codes for a minute, doubling each time
-(status 17).
+every code needs someone in range to ask for it. After nine wrong codes in
+a row (three codes' worth, counted across codes), the device hides the code
+and refuses new ones for a minute, doubling each time (status 17, with the
+seconds left).
+
+A host that's already authenticated can pair again with a code, to go from
+level 1 to 2: the exchange runs inside the sealed session, the reply to
+`auth-confirm` goes out under the old keys, and the new keys start with
+the next message.
 
 On the device, SPAKE2 is a few point multiplications with mbedTLS
 (hardware-accelerated on ESP32, well under a second). In the browser, Web
@@ -623,8 +652,10 @@ host sends, `deviceKey` for what the device sends.
 
   then zeros.
 - A message that fails to open ends the session: the device replies status
-  15 and drops the connection back to level 0. Keys and counters belong to
-  one connection, so a disconnect ends the session too.
+  15 **in the clear, with no body** (so a host can't mistake it for a sealed
+  reply, which always has a tag) and drops the connection back to level 0.
+  Keys and counters belong to one connection, so a disconnect ends the
+  session too.
 
 Sealing costs 8 bytes per message and little time (the ESP32 has AES in
 hardware). What stays in the clear is the protocol headers, Info, and any
@@ -685,38 +716,40 @@ framing, over WebSocket, to browsers.
 
 The schema is generated from one table in the firmware. That table is the
 device's whole exposure policy: settings, values and actions the firmware
-has but doesn't list are unreachable over BLE. A sketch for the X4, reusing
-its existing `settings::Choice` definitions:
+has but doesn't list are unreachable over BLE. It's also where each
+setting's default and storage are declared, so the firmware's own settings
+and what hosts see can't drift apart.
+
+The [firmware library](firmware/README.md#declaring-controls) defines the
+format. From the X4's [`Controls.h`](../xteink-x4-platformio/src/Controls.h):
 
 ```cpp
-// src/ble/BlocControls.cpp: everything the X4 exposes over blat.
-using namespace blat;
-
-constexpr Control kControls[] = {
-    group("display", "Display"),
-    choice("display.refresh", settings::kRefresh, Access{0, 1}, kLive),
-    choice("display.frameSleep", settings::kFrameSleep, Access{0, 1}, kLive),
-
-    group("power", "Power"),
-    choice("power.sleep", settings::kSleep, Access{0, 1}, kLive),
-    readout("power.battery", "Battery", Unit::Percent, Access{0}, kLive),
-
-    group("files", "Images"),
-    dir("files.images", "/images", ".bmp,.png", Access{1, 2}),
-
-    action("system.restart", "Restart", Access{2}, kConfirm),
+inline constexpr blat::Control kControls[] = {
+    blat::group("display", "Display"),
+    blat::choice("display.refresh", kRefreshOptions)
+        .in("display")
+        .label("Full refresh every")
+        .help("Clears ghosting left by fast partial refreshes. Higher is faster; lower is cleaner.")
+        .initial(12)
+        .saveAs("refresh")
+        .live(),
+    blat::number("power.battery").in("power").label("Battery").unit("%").range(0, 100).readOnly().live(),
+    blat::action("system.restart").in("system").label("Restart").confirm().write(blat::kLevelPresent),
 };
-// settings::kClock isn't listed, so hosts can't see or change it.
+static_assert(blat::check(kControls));
 ```
 
-- `Access{read, write}` gives the [access levels](#access-levels); a single
-  level is read-only. So the exposure of each control is one of: absent
-  (not in the table), read-only, or read-write, each at a level.
-- The schema blob and its CRC are built from the table at compile time, or
-  once at boot, and live in flash. No per-connection work.
-- Well-known keys get their types checked at compile time where the
-  language allows it, so a firmware can't publish `wifi.password` as plain
-  `text`.
+- `.read()` and `.write()` give the [access levels](#access-levels), and
+  `.readOnly()` means hosts can't write it at all. So the exposure of each
+  control is one of: absent (not in the table), read-only, or read-write,
+  each at a level. In the schema a read-only control has write level 0.
+- `.initial()` is the default and `.saveAs()` where it's saved; both are
+  the firmware's business, and the default is also sent as the `default`
+  attribute.
+- The table is checked when the firmware compiles: defaults must be valid,
+  keys unique, nothing writable at level 0, well-known keys the right type.
+- The schema blob and its CRC are built from the table once at boot. No
+  per-connection work.
 
 **Exposure that changes at runtime.** A device may expose different controls
 in different states: `system.firmware` only while on external power, or
@@ -796,28 +829,31 @@ that changes what's exposed simply shows up as a new schema.
 
 In order; each step is usable by itself.
 
-1. **JS library and simulated device**: request/reply, schema parser, value
+1. **Firmware library**, with native tests and a simulated device.
+   *Done: [`firmware/`](firmware/).*
+2. **JS library and simulated device**: request/reply, schema parser, value
    codecs, transfers (reusing blit's), authentication and sealing, a
    `sim-device.js` with a sample schema that prints its code. Tests like
    `blit/js/test`, including the RFC 9382 test vectors.
-2. **Web Bluetooth page** with the generic form renderer. Works against the
+3. **Web Bluetooth page** with the generic form renderer. Works against the
    simulated device first.
-3. **X4 firmware**: the [controls table](#declaring-controls-in-firmware),
-   exposing `settings::Choice` as `enum` controls with `live`, and the code
-   screen with its QR code. A second GATT service next to `CastServer`.
-4. **Server**: BLE bridge (from `blit/server`), WebSocket relay, the pages
+4. **X4 firmware**: the [controls table](#declaring-controls-in-firmware)
+   for its settings, the code screen, and a second GATT service next to
+   `CastServer`. *Done, except the QR code.*
+5. **Server**: BLE bridge (from `blit/server`), WebSocket relay, the pages
    above.
-5. **Files**: `dir` control for the X4's SD images.
-6. **Wi-Fi**: on an ESP32 that uses it (the M5StickS3), with `wifi.scan` and
+6. **Files**: `dir` control for the X4's SD images.
+7. **Wi-Fi**: on an ESP32 that uses it (the M5StickS3), with `wifi.scan` and
    `wifi.connect`.
-7. **Label codes** for headless devices, if one needs blat.
+8. **Label codes** for headless devices, if one needs blat.
 
 ## Open questions
 
 - **Our own composition of standard crypto.** SPAKE2, HKDF, HMAC and
   AES-CCM are standard, but the way they're put together here isn't. It
-  should get a careful review, and test vectors, before anything important
-  relies on it.
+  should get a careful review before anything important relies on it. The
+  firmware and an independent Python host agree on it, but neither has been
+  checked against RFC 9382's published test vectors yet.
 - **Longer codes in the QR code.** The QR code could carry a longer secret
   than the digits on screen, but then typed and scanned codes would need to
   differ. Six digits with SPAKE2 and attempt limits is enough, so they stay
@@ -837,3 +873,10 @@ In order; each step is usable by itself.
   input (a text box that types into the device as you type) would be a
   `text` control with `live` plus a debounce on the host; worth trying before
   adding anything.
+
+## Implementations
+
+| Where | Role | Notes |
+| --- | --- | --- |
+| [`firmware/`](firmware/) | device library (C++, ESP32, Arduino + NimBLE) | Declaration format, values and storage, the protocol, pairing and sealing. Native tests, including a Python host and a simulated device. |
+| [`xteink-x4-platformio`](../xteink-x4-platformio/) (`src/Controls.h`, `src/Settings.*`, `src/ble/Remote.*`) | device | Its settings, battery and a restart action, while the Bluetooth app is open. Shows the pairing code on screen. |
