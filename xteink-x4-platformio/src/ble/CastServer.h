@@ -4,12 +4,18 @@
 #include <cstddef>
 #include <cstdint>
 
-// BLE cast receiver: a GATT server that accepts frames per the blit protocol,
-// v2 (../blit/PROTOCOL.md at the repo root), and still takes v1 headers.
+class NimBLEServer;
+
+// BLE cast receiver: a GATT service that accepts frames per the blit protocol,
+// v2 (../blit/PROTOCOL.md at the repo root), and still takes v1 headers. The
+// BLE stack itself is Radio's (Radio.h), which adds this service to its server.
 // NimBLE runs its callbacks on its own task, which only receives (and decodes)
 // bytes; the main loop takes finished frames with takeFrame(), shows them,
 // then replies with notifyDone() / notifyError().
 namespace cast {
+
+// blit/PROTOCOL.md#transport-bluetooth-le-gatt (repo root)
+constexpr const char* kServiceUuid = "b1ec0000-5f3a-4e62-9a47-0c3d8e5f2a10";
 
 // Pixel formats (blit/PROTOCOL.md#pixel-formats).
 constexpr uint8_t kFormatMono1 = 1;
@@ -101,17 +107,15 @@ class CastServer {
   static constexpr size_t kMaxBytes = 96000;
 #endif
 
-  // Start advertising, bringing up the BLE stack. Returns false on failure.
-  bool begin();
-  // Disconnect and shut the BLE stack down (frees its memory, radio off).
-  void end();
-  bool running() const { return running_; }
+  // Radio: add the blit service to the GATT server (before it starts), and
+  // forget everything once the stack is shut down.
+  void attach(NimBLEServer* gatt);
+  void detach();
   bool connected() const { return connected_.load(); }
   // A frame is being received (between Begin and Commit).
   bool receiving() const { return receiving_.load(); }
   // The last frame was rejected (error status sent); cleared by the next Begin.
   bool failed() const { return failed_.load(); }
-  const char* name() const { return name_; }
   // The connected host's name from its hello, or "".
   void hostName(char* out, size_t size) const;
 
@@ -142,7 +146,7 @@ class CastServer {
   void sendPower();
   void disconnect();
 
-  // NimBLE callbacks (BLE task).
+  // NimBLE callbacks (BLE task), connection events forwarded by Radio.
   void onConnect(uint16_t connHandle);
   void onDisconnect();
   void onControl(const uint8_t* data, size_t length);
@@ -162,8 +166,6 @@ class CastServer {
   void commitFrame();
   void fail(Error code, uint32_t detail = 0);
 
-  bool running_ = false;
-  char name_[12] = "";
   std::atomic<bool> connected_{false};
   std::atomic<bool> activity_{false};
   std::atomic<uint16_t> connHandle_{0};

@@ -1,87 +1,59 @@
 #include "Settings.h"
 
+#include <Logging.h>
 #include <Preferences.h>
 
 namespace settings {
 
 namespace {
 
-constexpr Option kRefreshOptions[] = {
-    {6, "6", "pages", "6 pages"},
-    {12, "12", "pages", "12 pages"},
-    {24, "24", "pages", "24 pages"},
-    {0, "Never", "", "Never"},
+constexpr const char* kNamespace = "settings";
+
+blat::PrefsStore prefsStore;
+blat::Values currentValues;
+
+// Before blat, settings were saved in the "shell" namespace as an index into
+// each setting's option list. Move them over once, then drop the old keys.
+struct Legacy {
+  const char* key;
+  blat::Id id;
+  uint16_t values[5];  // the old option order
+  uint8_t count;
 };
-constexpr Option kSleepOptions[] = {
-    {1, "1", "min", "1 min"},
-    {5, "5", "min", "5 min"},
-    {10, "10", "min", "10 min"},
-    {30, "30", "min", "30 min"},
-    {0, "Never", "", "Never"},
-};
-constexpr Option kClockOptions[] = {
-    {24, "24", "hour", "24h"},
-    {12, "12", "hour", "12h"},
-};
-constexpr Option kOnOffOptions[] = {
-    {0, "Off", "", "Off"},
-    {1, "On", "", "On"},
+constexpr Legacy kLegacy[] = {
+    {"refresh", kRefresh, {6, 12, 24, 0}, 4},
+    {"sleep", kSleep, {1, 5, 10, 30, 0}, 5},
+    {"clock", kClock, {24, 12}, 2},
+    {"framesleep", kFrameSleep, {0, 1}, 2},
 };
 
-constexpr int kMaxChoices = 4;
-const Choice* const kAll[kMaxChoices] = {&kRefresh, &kSleep, &kClock, &kFrameSleep};
-uint8_t indices[kMaxChoices];
-
-Preferences prefs;
-
-int slot(const Choice& choice) {
-  for (int i = 0; i < kMaxChoices; i++) {
-    if (kAll[i] == &choice) return i;
+void migrateLegacy() {
+  Preferences old;
+  if (!old.begin("shell", false)) return;
+  for (const auto& l : kLegacy) {
+    if (!old.isKey(l.key)) continue;
+    const uint8_t index = old.getUChar(l.key, 0xFF);
+    if (index < l.count) {
+      currentValues.set(l.id, l.values[index]);
+      LOG_INF("SET", "Moved %s = %u to blat", l.key, l.values[index]);
+    }
+    old.remove(l.key);
   }
-  return 0;
+  old.end();
 }
 
 }  // namespace
 
-const Choice kRefresh{"refresh",
-                      "Refresh",
-                      "Full refresh every",
-                      "Clears ghosting left by fast partial refreshes. Higher is faster; lower is cleaner.",
-                      kRefreshOptions,
-                      4,
-                      1};
-const Choice kSleep{"sleep",
-                    "Sleep after",
-                    "Sleep after",
-                    "Time without a key press before the device sleeps. Hold Power to sleep at any time.",
-                    kSleepOptions,
-                    5,
-                    2};
-const Choice kClock{"clock", "Clock", "Clock shows", "How the home screen shows the time.", kClockOptions, 2, 0};
-const Choice kFrameSleep{"framesleep",
-                         "Frame sleep",
-                         "Sleep between frames",
-                         "When a Bluetooth sender says when its next frame is due, sleep until just before it.",
-                         kOnOffOptions,
-                         2,
-                         0};
-
 void begin() {
-  prefs.begin("shell", false);
-  for (int i = 0; i < kMaxChoices; i++) {
-    const uint8_t stored = prefs.getUChar(kAll[i]->key, kAll[i]->defaultIndex);
-    indices[i] = stored < kAll[i]->count ? stored : kAll[i]->defaultIndex;
+  if (!prefsStore.begin(kNamespace)) LOG_ERR("SET", "Couldn't open NVS namespace %s", kNamespace);
+  currentValues.begin(blat::table(controls::kControls), &prefsStore);
+  migrateLegacy();
+  // Changes made while nobody was connected aren't news to the next host.
+  while (currentValues.takeDeviceChange() != 0) {
   }
 }
 
-int index(const Choice& choice) { return indices[slot(choice)]; }
-
-uint16_t value(const Choice& choice) { return choice.options[index(choice)].value; }
-
-void set(const Choice& choice, const int index) {
-  if (index < 0 || index >= choice.count) return;
-  indices[slot(choice)] = index;
-  prefs.putUChar(choice.key, index);
-}
+blat::Values& values() { return currentValues; }
+blat::Store& store() { return prefsStore; }
 
 }  // namespace settings

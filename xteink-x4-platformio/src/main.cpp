@@ -18,6 +18,7 @@
 #include "apps/BleApp.h"
 #include "apps/ImageApp.h"
 #include "apps/SettingsApp.h"
+#include "ble/Remote.h"
 #include "shell/Input.h"
 #include "shell/Layout.h"
 #include "shell/Shell.h"
@@ -115,6 +116,7 @@ void setup() {
   renderer.setFontCacheManager(&fontCacheManager);
   fonts::registerAll(renderer);
   settings::begin();
+  remote::begin();
 
   shell.addApp(&imageApp);
   shell.addApp(&bleApp);

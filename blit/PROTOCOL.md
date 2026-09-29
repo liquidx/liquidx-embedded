@@ -9,6 +9,10 @@ This document is the spec. Version **2** is described here, with version
 that every host still has to speak. [Compatibility with v1](#compatibility-with-v1)
 lists the differences.
 
+Settings, Wi-Fi, actions and files are out of scope on purpose: they belong
+to the sister protocol [blat](../blat/PROTOCOL.md), which a display can speak
+alongside blit.
+
 | Term | Meaning |
 | --- | --- |
 | **Display** | The device that shows frames. The BLE peripheral and GATT server. |
