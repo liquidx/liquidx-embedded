@@ -17,11 +17,15 @@
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@stoprocent/noble": "^2.8.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
+    "@types/web-bluetooth": "^0.0.21",
+    "playwright-core": "^1.63.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
   }

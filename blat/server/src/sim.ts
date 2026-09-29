@@ -6,7 +6,8 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { FrameStream, type Link, type LinkHandlers } from './blat/link.ts';
+import type { Link, LinkHandlers } from './blat/link.ts';
+import { FrameStream } from './stream.ts';
 
 export const DEFAULT_SIM = fileURLToPath(new URL('../../firmware/test/build/sim_device', import.meta.url));
 

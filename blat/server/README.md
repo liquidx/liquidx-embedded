@@ -1,17 +1,25 @@
 # blat-server
 
-The host side of [blat](../PROTOCOL.md). It finds blat devices over Bluetooth
-LE, connects, pairs with the code a device shows, and serves a web page with
-a form for each device's settings, generated from what the device declares.
-Run it on a Mac, a Raspberry Pi, or anything with a Bluetooth adapter, and
-use the page from any browser that can reach it.
+The host side of [blat](../PROTOCOL.md), two ways:
 
 ```
-browser ── HTTP + server-sent events ──► blat-server ── BLE (noble) ──► devices
+ server   browser ── HTTP + server-sent events ──► blat-server ── BLE (noble) ──► devices
+ browser  browser ── Web Bluetooth ──► device
 ```
 
-The server is the blat host: it holds the session keys and the keys devices
-give it to reconnect without a code. The browser never talks blat.
+- **blat-server** finds blat devices over Bluetooth LE, connects, pairs with
+  the code a device shows, and serves a page with a form for each device's
+  settings, generated from what the device declares. Run it on a Mac, a
+  Raspberry Pi, or anything with a Bluetooth adapter, and use the page from
+  any browser that can reach it. The server is the blat host: it holds the
+  session keys and the keys devices give it to reconnect without a code, and
+  its page never talks blat.
+- **The [Web Bluetooth page](#the-web-bluetooth-page)** (`bluetooth.html`)
+  does the same from the browser alone, with no server: the browser is the
+  host.
+
+Both use the same protocol library (`src/blat/`, pure TypeScript, for Node
+and browsers) and the same form.
 
 ## Install
 
@@ -90,6 +98,28 @@ A URL like `/#d=<deviceId>&c=<code>` (what a device's pairing
 [QR code](../PROTOCOL.md#the-qr-code) will carry) fills in the code for that
 device when it's pairing.
 
+## The Web Bluetooth page
+
+`bluetooth.html`: **Choose a device** opens the browser's Bluetooth chooser,
+listing devices that advertise blat. Then it's the same form as the server's
+page, and pairing works the same way. After pairing, the page asks the
+device to remember this browser, and keeps the key in the browser's local
+storage, so **Reconnect** (or a later visit) resumes without a code. Schemas
+are cached there too, by CRC. **Forget** drops the key.
+
+- Needs Chrome or Edge, on a computer or Android. Safari (including every iOS
+  browser) and Firefox have no Web Bluetooth; the page says so.
+- Needs a secure context: HTTPS, or `localhost`. blat-server serves it at
+  `/bluetooth.html`, and `pnpm dev` does too; `pnpm build` puts a static copy
+  in `dist/` that works from any HTTPS host (e.g. GitHub Pages), no server
+  needed.
+- The stored key lets anyone with access to this browser profile change the
+  device's everyday settings. Level-2 controls (the X4's Restart) still need
+  a fresh code.
+- The page is about 25 KB gzipped, mostly the P-256 and AES code: Web Crypto
+  has neither raw curve arithmetic nor AES-CCM, so both are pure JavaScript
+  (`@noble/curves`, `@noble/ciphers`), checked against OpenSSL in the tests.
+
 ## API
 
 JSON over HTTP. Requests that change anything must be JSON, and from the
@@ -118,17 +148,21 @@ tries left). Types are in [`src/api.ts`](src/api.ts).
 
 | File | |
 | --- | --- |
-| `src/blat/` | The host side of the protocol, independent of Bluetooth and HTTP: `client.ts` (`BlatClient`), `crypto.ts` (SPAKE2, sealing), `schema.ts`, `wire.ts`, `link.ts` (the transport interface and stream framing) |
+| `src/blat/` | The host side of the protocol, for Node and browsers: `client.ts` (`BlatClient`), `crypto.ts` (SPAKE2, AES-CCM), `schema.ts`, `wire.ts`, `link.ts` (the transport interface) |
 | `src/ble.ts` | Scanning, and `NobleLink`: the blat GATT service over noble |
-| `src/sim.ts` | The simulated device as a child process |
+| `src/sim.ts`, `src/stream.ts` | The simulated device as a child process, over the stream framing |
 | `src/devices.ts` | `DeviceManager`: connections, pairing, remembered keys, events |
 | `src/http.ts`, `src/cli.ts` | The server |
 | `src/store.ts` | Remembered keys and cached schemas on disk |
-| `web/` | The page |
-| `test/` | `client.test.ts` (the protocol against the simulated device), `server.test.ts` (the API end to end) |
+| `web/index.html`, `main.ts`, `api.ts` | The server's page |
+| `web/bluetooth.html`, `bluetooth.ts`, `webble.ts` | The Web Bluetooth page, and `WebBluetoothLink` |
+| `web/view.ts`, `controls.ts`, `dom.ts` | A device and its form, shared by both pages |
+| `test/` | `client.test.ts` (the protocol against the simulated device), `crypto.test.ts` (against OpenSSL), `server.test.ts` (the API end to end), `bluetooth.test.ts` (the Web Bluetooth page in Chromium, with `navigator.bluetooth` wired to the simulated device) |
 
 ```sh
 pnpm test          # needs the simulated device: make -C ../firmware/test sim
+                   # bluetooth.test.ts also needs Chromium: CHROME_PATH, or
+                   # `npx playwright install chromium`; it's skipped without
 pnpm typecheck
 pnpm dev           # the server with --dev
 ```
@@ -142,4 +176,5 @@ pnpm dev           # the server with --dev
   doesn't support yet either.
 - More than one connection per device, and more than one device on a
   single-connection adapter at a time.
-- Tested against the simulated device only, not yet an X4 over Bluetooth.
+- Tested against the simulated device only, not yet an X4 over Bluetooth
+  (through noble or a browser).

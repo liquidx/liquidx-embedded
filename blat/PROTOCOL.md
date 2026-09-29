@@ -723,7 +723,7 @@ factory reset, firmware, forgetting hosts) take a fresh code. The firmware
 decides which controls those are, by giving them write level 2.
 
 Hosts store `hostId` and `hostKey` per `deviceId`: a Web Bluetooth page in
-IndexedDB, a server in its data directory. A device lists and forgets hosts
+the browser's storage, a server in its data directory. A device lists and forgets hosts
 with the [well-known controls](#well-known-keys) `auth.hosts` and
 `auth.forget`, and `system.factoryReset` forgets them all.
 
@@ -927,12 +927,12 @@ In order; each step is usable by itself.
 1. **Firmware library**, with native tests and a simulated device.
    *Done: [`firmware/`](firmware/).*
 2. **Host library**: request/reply, schema parser, value codecs, transfers,
-   authentication and sealing. *Done in TypeScript for Node:
+   authentication and sealing. *Done in TypeScript for Node and browsers:
    [`server/src/blat/`](server/src/blat/), tested against the firmware's
-   simulated device. A browser build needs its crypto moved off
-   `node:crypto`.* Still to do: the RFC 9382 test vectors.
-3. **Web Bluetooth page** with the generic form renderer. Works against the
-   simulated device first.
+   simulated device.* Still to do: the RFC 9382 test vectors.
+3. **Web Bluetooth page** with the generic form renderer. *Done:
+   [`server/web/bluetooth.html`](server/web/bluetooth.html), tested in
+   Chromium against the simulated device.*
 4. **X4 firmware**: the [controls table](#declaring-controls-in-firmware)
    for its settings, the code screen, and a second GATT service next to
    `CastServer`. *Done, except the QR code.*
@@ -977,3 +977,4 @@ In order; each step is usable by itself.
 | [`firmware/`](firmware/) | device library (C++, ESP32, Arduino + NimBLE) | Declaration format, values and storage, the protocol, pairing and sealing. Native tests, including a Python host and a simulated device. |
 | [`xteink-x4-platformio`](../xteink-x4-platformio/) (`src/Controls.h`, `src/Settings.*`, `src/ble/Remote.*`) | device | Its settings, battery and a restart action, while the Bluetooth app is open. Shows the pairing code on screen. |
 | [`server/`](server/) | host (TypeScript, Node, noble) | Scans, connects, pairs and resumes; serves a web page generated from each device's schema. Tested against the simulated device. |
+| [`server/web/bluetooth.html`](server/web/bluetooth.html) | host (TypeScript, Web Bluetooth) | The same library and form in the browser, no server: pairs, and keeps its key in the browser's storage. Any static host over HTTPS. |

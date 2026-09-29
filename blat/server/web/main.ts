@@ -1,13 +1,11 @@
 // blat-server's page: the devices the server knows, and a form for the one
-// you pick. State lives here; render functions rebuild the parts that change.
+// you pick. The server is the blat host; this page talks JSON to it.
 
-import type { DeviceState, DeviceSummary, PairingStarted, ServerEvent, Value } from '../src/api.ts';
-import { RequestError, api, listen } from './api.ts';
-import { type Form, renderControls } from './controls.ts';
+import type { DeviceState, DeviceSummary, ServerEvent } from '../src/api.ts';
+import { type RequestError, api, listen } from './api.ts';
+import type { Form } from './controls.ts';
 import { clear, h } from './dom.ts';
-
-const STATUS_WRONG_CODE = 16;
-const STATUS_LOCKED_OUT = 17;
+import { type Pairing, afterWrongCode, clearQrCode, levelName, pairingRefused, readQrCode, renderDeviceView, toast } from './view.ts';
 
 const state = {
   devices: [] as DeviceSummary[],
@@ -17,29 +15,14 @@ const state = {
   device: null as DeviceState | null,
   form: null as Form | null,
   connecting: false,
-  pairing: null as (PairingStarted & { error?: string }) | null,
+  pairing: null as Pairing | null,
   simCodes: new Map<string, string | null>(),
-  // From a QR code on the device: /#d=<deviceId>&c=<code> (PROTOCOL.md#the-qr-code).
-  qr: null as { deviceId: string; code: string } | null,
+  qr: readQrCode(),
 };
 
 const $devices = document.getElementById('devices')!;
 const $device = document.getElementById('device')!;
-const $toast = document.getElementById('toast')!;
 const $linkState = document.getElementById('link-state')!;
-
-// --- Messages --------------------------------------------------------------------
-
-let toastTimer: number | undefined;
-function toast(text: string, error = false) {
-  $toast.textContent = text;
-  $toast.className = error ? 'error' : '';
-  $toast.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => ($toast.hidden = true), 4000);
-}
-
-const LEVELS = ['Read only', 'Paired', 'Paired with a code'];
 
 // --- Devices ---------------------------------------------------------------------
 
@@ -57,23 +40,24 @@ function renderDevices() {
     $devices.append(
       h('p', { class: 'muted' }, state.scanning ? 'Looking for devices…' : 'No devices yet. On an X4, open the Bluetooth app so it advertises, then scan.'),
     );
-    return;
-  }
-  const list = h('ul', { class: 'device-list' });
-  for (const d of state.devices) {
-    list.append(
-      h('li', {},
-        h('button', { type: 'button', class: 'device', 'aria-current': d.id === state.selected ? 'true' : null, onclick: () => select(d.id) },
-          h('span', { class: 'name' }, d.name),
-          h('span', { class: 'meta' },
-            d.connected ? h('span', { class: `badge level-${d.level}` }, LEVELS[d.level] ?? `Level ${d.level}`) : h('span', { class: 'muted' }, 'Not connected'),
-            d.rssi !== null ? h('span', { class: 'muted' }, `${d.rssi} dBm`) : null,
+  } else {
+    const list = h('ul', { class: 'device-list' });
+    for (const d of state.devices) {
+      list.append(
+        h('li', {},
+          h('button', { type: 'button', class: 'device', 'aria-current': d.id === state.selected ? 'true' : null, onclick: () => select(d.id) },
+            h('span', { class: 'name' }, d.name),
+            h('span', { class: 'meta' },
+              d.connected ? h('span', { class: `badge level-${d.level}` }, levelName(d.level)) : h('span', { class: 'muted' }, 'Not connected'),
+              d.rssi !== null ? h('span', { class: 'muted' }, `${d.rssi} dBm`) : null,
+            ),
           ),
         ),
-      ),
-    );
+      );
+    }
+    $devices.append(list);
   }
-  $devices.append(list);
+  $devices.append(h('p', { class: 'muted small' }, 'Or connect from this browser: ', h('a', { href: './bluetooth.html' }, 'Web Bluetooth page'), '.'));
 }
 
 async function scan() {
@@ -115,53 +99,54 @@ async function connect(id: string) {
 // --- The selected device ---------------------------------------------------------
 
 function renderDevice() {
-  clear($device);
   state.form = null;
   const id = state.selected;
   if (!id) {
-    $device.append(h('p', { class: 'muted empty' }, 'Pick a device.'));
+    $device.replaceChildren(h('p', { class: 'muted empty' }, 'Pick a device.'));
     return;
   }
-  const summary = state.devices.find((d) => d.id === id);
   const d = state.device;
   if (!d || !d.connected) {
-    $device.append(
+    const summary = state.devices.find((x) => x.id === id);
+    $device.replaceChildren(
       h('header', { class: 'device-head' }, h('h2', {}, summary?.name ?? id)),
-      state.connecting
-        ? h('p', { class: 'muted' }, 'Connecting…')
-        : h('p', {}, h('button', { type: 'button', onclick: () => connect(id) }, 'Connect')),
+      state.connecting ? h('p', { class: 'muted' }, 'Connecting…') : h('p', {}, h('button', { type: 'button', onclick: () => connect(id) }, 'Connect')),
     );
     return;
   }
-
-  const level = d.level;
-  $device.append(
-    h('header', { class: 'device-head' },
-      h('div', {},
-        h('h2', {}, d.name),
-        h('p', { class: 'muted' }, [d.model, d.firmware && `firmware ${d.firmware}`, d.deviceId && `id ${d.deviceId}`].filter(Boolean).join(' · ')),
-      ),
-      h('div', { class: 'actions' },
-        h('span', { class: `badge level-${level}` }, LEVELS[level] ?? `Level ${level}`),
-        level < 2 && !state.pairing ? h('button', { type: 'button', onclick: startPairing }, level === 0 ? 'Pair' : 'Enter a code') : null,
-        d.remembered ? h('button', { type: 'button', class: 'quiet', title: 'Stop reconnecting without a code', onclick: forget }, 'Forget') : null,
-        h('button', { type: 'button', class: 'quiet', onclick: () => api.disconnect(d.id) }, 'Disconnect'),
-      ),
-    ),
+  const simCode = state.simCodes.get(d.id);
+  state.form = renderDeviceView(
+    $device,
+    {
+      name: d.name,
+      details: [d.model, d.firmware && `firmware ${d.firmware}`, d.deviceId && `id ${d.deviceId}`],
+      level: d.level,
+      remembered: d.remembered,
+      controls: d.controls,
+      values: d.values,
+      pairing: state.pairing,
+      pairingHint: simCode ? `The simulated device shows ${simCode}.` : null,
+    },
+    {
+      pair: startPairing,
+      submitCode,
+      cancelPairing: () => {
+        state.pairing = null;
+        renderDevice();
+      },
+      forget: async () => {
+        state.device = await api.forget(d.id);
+        renderDevice();
+      },
+      disconnect: () => void api.disconnect(d.id),
+      set: async (cid, value) => {
+        await api.set(d.id, { [cid]: value });
+      },
+      invoke: async (action, params) => {
+        await api.invoke(d.id, action, params);
+      },
+    },
   );
-  if (state.pairing) $device.append(pairingBox(d));
-
-  state.form = renderControls(d.controls, d.values, {
-    level,
-    set: async (cid: number, value: Value) => {
-      await api.set(d.id, { [cid]: value });
-    },
-    invoke: async (action: number, params: Record<number, Value>) => {
-      await api.invoke(d.id, action, params);
-    },
-    pair: () => void startPairing(),
-  });
-  $device.append(state.form.el);
 }
 
 async function startPairing() {
@@ -170,40 +155,17 @@ async function startPairing() {
   try {
     state.pairing = await api.pair(d.id);
   } catch (err) {
-    const e = err as RequestError;
-    toast(e.status === STATUS_LOCKED_OUT ? `Too many wrong codes: try again in ${e.detail} s` : e.message, true);
+    toast(pairingRefused(err as RequestError), true);
     return;
   }
   renderDevice();
-  tryQrCode();
-}
-
-function pairingBox(d: DeviceState): HTMLElement {
-  const p = state.pairing!;
-  const field = h('input', {
-    type: 'text',
-    inputmode: 'numeric',
-    autocomplete: 'one-time-code',
-    pattern: `\\d{${p.digits}}`,
-    maxlength: p.digits + 1,
-    placeholder: '0'.repeat(p.digits),
-    'aria-label': 'Pairing code',
-  });
-  const simCode = state.simCodes.get(d.id);
-  const box = h('form', { class: 'pairing', onsubmit: (e: Event) => {
-    e.preventDefault();
-    void submitCode(field.value);
-  } },
-    h('p', {}, `Enter the ${p.digits}-digit code shown on ${d.name}.`),
-    simCode ? h('p', { class: 'muted' }, `The simulated device shows ${simCode}.`) : null,
-    h('div', { class: 'inline' }, field, h('button', { type: 'submit' }, 'Pair'), h('button', { type: 'button', class: 'quiet', onclick: () => {
-      state.pairing = null;
-      renderDevice();
-    } }, 'Cancel')),
-    p.error ? h('p', { class: 'status error' }, p.error) : h('p', { class: 'muted' }, `${p.attemptsLeft} tries, ${Math.round(p.expiresSeconds / 60)} minutes.`),
-  );
-  queueMicrotask(() => field.focus());
-  return box;
+  // A code from a QR code, for the device that's showing it.
+  if (state.qr && state.qr.deviceId === d.deviceId) {
+    const { code } = state.qr;
+    state.qr = null;
+    clearQrCode();
+    await submitCode(code);
+  }
 }
 
 async function submitCode(code: string) {
@@ -215,31 +177,11 @@ async function submitCode(code: string) {
     state.pairing = null;
     toast(state.device.remembered ? 'Paired. This server will reconnect without a code.' : 'Paired.');
   } catch (err) {
-    const e = err as RequestError;
-    if (e.status === STATUS_WRONG_CODE && e.detail) {
-      state.pairing = { ...pairing, attemptsLeft: e.detail, error: `Wrong code: ${e.detail} ${e.detail === 1 ? 'try' : 'tries'} left.` };
-    } else {
-      state.pairing = null;
-      toast(e.status === STATUS_WRONG_CODE ? 'Wrong code, and no tries left. Pair again for a new code.' : e.message, true);
-    }
+    const next = afterWrongCode(err as RequestError, pairing);
+    state.pairing = next.pairing;
+    if (next.message) toast(next.message, true);
   }
   renderDevice();
-}
-
-async function forget() {
-  const d = state.device;
-  if (!d) return;
-  state.device = await api.forget(d.id);
-  renderDevice();
-}
-
-// A code from a QR code, for the device that's showing it.
-function tryQrCode() {
-  const qr = state.qr;
-  if (!qr || !state.pairing || state.device?.deviceId !== qr.deviceId) return;
-  state.qr = null;
-  history.replaceState(null, '', location.pathname);
-  void submitCode(qr.code);
 }
 
 // --- Server events ----------------------------------------------------------------
@@ -255,11 +197,6 @@ function onEvent(e: ServerEvent) {
       const now = state.devices.find((d) => d.id === state.selected);
       if (before && now && before.connected && !now.connected) {
         state.device = null;
-        state.pairing = null;
-        renderDevice();
-      }
-      // A device showing a code for us (e.g. paired from another tab).
-      if (now && !now.pairing && state.pairing && now.level === 2) {
         state.pairing = null;
         renderDevice();
       }
@@ -286,14 +223,6 @@ function onEvent(e: ServerEvent) {
   }
 }
 
-function readQr() {
-  const params = new URLSearchParams(location.hash.slice(1));
-  const deviceId = params.get('d');
-  const code = params.get('c');
-  if (deviceId && code) state.qr = { deviceId: deviceId.toLowerCase(), code };
-}
-
-readQr();
 renderDevices();
 renderDevice();
 listen(onEvent, (online) => {

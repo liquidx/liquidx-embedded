@@ -4,7 +4,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "lib": ["es2023", "dom", "dom.iterable"],
-    "types": [],
+    "types": ["web-bluetooth"],
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,

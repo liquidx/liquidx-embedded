@@ -1,9 +1,13 @@
 // The cryptography of blat authentication (PROTOCOL.md#authentication), host
 // side: SPAKE2 party A on P-256, HKDF and HMAC for keys, AES-128-CCM for
-// sealing. Point arithmetic is @noble/curves; the rest is node:crypto.
+// sealing. Pure JavaScript (@noble), so the same code runs in Node and in a
+// browser: Web Crypto has no AES-CCM and no raw point arithmetic.
 
+import { cbc, ecb } from '@noble/ciphers/aes.js';
 import { p256 } from '@noble/curves/nist.js';
-import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
+import { hkdf as nobleHkdf } from '@noble/hashes/hkdf.js';
+import { hmac as nobleHmac } from '@noble/hashes/hmac.js';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
 
 const Point = p256.Point;
 const N = Point.Fn.ORDER;
@@ -15,32 +19,38 @@ const NN = Point.fromHex('03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f
 export const TAG_BYTES = 8;
 const enc = new TextEncoder();
 
-export const random = (n: number): Uint8Array => new Uint8Array(randomBytes(n));
+export function random(n: number): Uint8Array {
+  return globalThis.crypto.getRandomValues(new Uint8Array(n));
+}
 
 export function sha256(...parts: Uint8Array[]): Uint8Array {
-  const h = createHash('sha256');
-  for (const p of parts) h.update(p);
-  return new Uint8Array(h.digest());
+  return nobleSha256(concat(...parts));
 }
 
 export function hmac(key: Uint8Array, ...parts: Uint8Array[]): Uint8Array {
-  const h = createHmac('sha256', key);
-  for (const p of parts) h.update(p);
-  return new Uint8Array(h.digest());
+  return nobleHmac(nobleSha256, key, concat(...parts));
 }
 
 /** HKDF-SHA256. An empty salt means HashLen zero bytes, as RFC 5869 says. */
 export function hkdf(salt: Uint8Array, ikm: Uint8Array, info: Uint8Array | string, length: number): Uint8Array {
   const i = typeof info === 'string' ? enc.encode(info) : info;
-  return new Uint8Array(hkdfSync('sha256', ikm, salt.length ? salt : new Uint8Array(32), i, length));
+  return nobleHkdf(nobleSha256, ikm, salt.length ? salt : new Uint8Array(32), i, length);
 }
 
+/** Constant-time comparison. */
 export function equal(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && timingSafeEqual(a, b);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
 }
 
-const bigFromBytes = (b: Uint8Array) => BigInt('0x' + (Buffer.from(b).toString('hex') || '0'));
-const bytesFromBig = (v: bigint) => Uint8Array.from(Buffer.from(v.toString(16).padStart(64, '0'), 'hex'));
+const toHexString = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const bigFromBytes = (b: Uint8Array) => BigInt('0x' + (toHexString(b) || '0'));
+function bytesFromBig(v: bigint): Uint8Array {
+  const hex = v.toString(16).padStart(64, '0');
+  return Uint8Array.from(hex.match(/../g)!, (h) => parseInt(h, 16));
+}
 
 function lengthPrefixed(b: Uint8Array): Uint8Array {
   const out = new Uint8Array(8 + b.length);
@@ -97,28 +107,73 @@ export class Spake2 {
   }
 }
 
-/** AES-128-CCM with a 13-byte nonce; the 8-byte tag is appended. */
+// --- AES-128-CCM (RFC 3610), 13-byte nonce, 8-byte tag -------------------------------
+//
+// Built from the public AES modes: CCM's MAC is the last block of CBC
+// encryption under a zero IV, and its keystream is ECB over counter blocks.
+
+const NONCE_BYTES = 13;
+const L = 15 - NONCE_BYTES; // bytes of message length in B0 and the counters
+
+function padded(b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(Math.ceil(b.length / 16) * 16);
+  out.set(b);
+  return out;
+}
+
+function ccmMac(key: Uint8Array, nonce: Uint8Array, aad: Uint8Array, plain: Uint8Array): Uint8Array {
+  const b0 = new Uint8Array(16);
+  b0[0] = (aad.length > 0 ? 0x40 : 0) | (((TAG_BYTES - 2) / 2) << 3) | (L - 1);
+  b0.set(nonce, 1);
+  b0[14] = plain.length >> 8;
+  b0[15] = plain.length & 0xff;
+  // AAD under 2^16 - 2^8 bytes: a 2-byte length, then the data, zero-padded.
+  const a = aad.length > 0 ? padded(concat(Uint8Array.of(aad.length >> 8, aad.length & 0xff), aad)) : new Uint8Array(0);
+  const blocks = concat(b0, a, padded(plain));
+  const macBlocks = cbc(key, new Uint8Array(16), { disablePadding: true }).encrypt(blocks);
+  return macBlocks.subarray(macBlocks.length - 16);
+}
+
+// S_0, S_1, … S_n: AES of the counter blocks.
+function keystream(key: Uint8Array, nonce: Uint8Array, blocks: number): Uint8Array {
+  const counters = new Uint8Array(16 * (blocks + 1));
+  for (let i = 0; i <= blocks; i++) {
+    counters[16 * i] = L - 1;
+    counters.set(nonce, 16 * i + 1);
+    counters[16 * i + 14] = i >> 8;
+    counters[16 * i + 15] = i & 0xff;
+  }
+  return ecb(key, { disablePadding: true }).encrypt(counters);
+}
+
+function checkSizes(key: Uint8Array, nonce: Uint8Array, aad: Uint8Array, length: number) {
+  if (key.length !== 16 || nonce.length !== NONCE_BYTES) throw new Error('AES-CCM: bad key or nonce size');
+  if (length >= 1 << (8 * L) || aad.length >= 0xff00) throw new Error('AES-CCM: message too long');
+}
+
+/** AES-128-CCM; the 8-byte tag is appended. */
 export function seal(key: Uint8Array, nonce: Uint8Array, aad: Uint8Array, plain: Uint8Array): Uint8Array {
-  const c = createCipheriv('aes-128-ccm', key, nonce, { authTagLength: TAG_BYTES });
-  c.setAAD(aad, { plaintextLength: plain.length });
-  const body = Buffer.concat([c.update(plain), c.final()]);
-  return concat(body, c.getAuthTag());
+  checkSizes(key, nonce, aad, plain.length);
+  const s = keystream(key, nonce, Math.ceil(plain.length / 16));
+  const mac = ccmMac(key, nonce, aad, plain);
+  const out = new Uint8Array(plain.length + TAG_BYTES);
+  for (let i = 0; i < plain.length; i++) out[i] = plain[i] ^ s[16 + i];
+  for (let i = 0; i < TAG_BYTES; i++) out[plain.length + i] = mac[i] ^ s[i];
+  return out;
 }
 
 /** Opens what seal() made, or returns null if it doesn't authenticate. */
 export function open(key: Uint8Array, nonce: Uint8Array, aad: Uint8Array, sealed: Uint8Array): Uint8Array | null {
   if (sealed.length < TAG_BYTES) return null;
-  const body = sealed.subarray(0, sealed.length - TAG_BYTES);
-  try {
-    const d = createDecipheriv('aes-128-ccm', key, nonce, { authTagLength: TAG_BYTES });
-    d.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES));
-    d.setAAD(aad, { plaintextLength: body.length });
-    const out = d.update(body);
-    d.final();
-    return new Uint8Array(out);
-  } catch {
-    return null;
-  }
+  const n = sealed.length - TAG_BYTES;
+  checkSizes(key, nonce, aad, n);
+  const s = keystream(key, nonce, Math.ceil(n / 16));
+  const plain = new Uint8Array(n);
+  for (let i = 0; i < n; i++) plain[i] = sealed[i] ^ s[16 + i];
+  const mac = ccmMac(key, nonce, aad, plain);
+  const tag = new Uint8Array(TAG_BYTES);
+  for (let i = 0; i < TAG_BYTES; i++) tag[i] = mac[i] ^ s[i];
+  return equal(tag, sealed.subarray(n)) ? plain : null;
 }
 
 /** A 13-byte nonce for Request, Reply and Event: channel, message count. */
