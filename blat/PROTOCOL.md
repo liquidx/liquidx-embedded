@@ -934,7 +934,7 @@ In order; each step is usable by itself.
    simulated device first.
 4. **X4 firmware**: the [controls table](#declaring-controls-in-firmware)
    for its settings, the code screen, and a second GATT service next to
-   `CastServer`. *Done, except the QR code.*
+   the blit one. *Done, except the QR code.*
 5. **Server**: BLE bridge (from `blit/server`), WebSocket relay, the pages
    above.
 6. **Files**: `dir` control for the X4's SD images.

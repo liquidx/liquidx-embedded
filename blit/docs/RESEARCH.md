@@ -452,7 +452,7 @@ of them can go without breaking v2 displays:
   use the caps `chunk` (not larger) and ignore `ready`'s value unless it's
   smaller. This needs displays to set up the transfer while handling the
   begin write, before the next write is processed. The X4 already does
-  (`CastServer::onControl` handles begin in the write callback). If the begin is
+  (`blit::Receiver::onControl` handles begin in the write callback). If the begin is
   rejected, the display reports the error and drops the Data that follows,
   as the X4 already does with Data when no transfer is in progress.
 
@@ -572,7 +572,7 @@ this). It costs nothing on the wire, and the pairing is a one-time step.
 1. Measure before changing the spec: log the time from wake to `done` on
    the X4 with frame sleep, split into scan, connect, discovery, caps and
    transfer, to check the cost model.
-2. Peripheral latency in `CastServer` (recommendation 1). No spec change.
+2. Peripheral latency in the X4's `Radio.cpp` (recommendation 1). No spec change.
 3. Spec v2 changes while no v2 display has shipped: `baseCrc` (open issue),
    the `frame` caps tag, committing without the final ack, the `sleep` op
    and the wake window.

@@ -1,0 +1,12 @@
+{
+  "name": "blit",
+  "version": "0.1.0",
+  "description": "Display side of blit: frames in over BLE, decoded as they arrive; key presses back.",
+  "keywords": ["ble", "display", "e-paper", "nimble"],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src"
+  }
+}
