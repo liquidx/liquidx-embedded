@@ -228,8 +228,8 @@ it out and hosts can't reach it. The format is described in
 Settings live in the NVS namespace `settings`. The first boot after
 updating moves the old values (saved as option indices in `shell`) across.
 
-There's no host app for blat yet: the only host so far is the Python one in
-[`blat/firmware/test`](../blat/firmware/test/). The code is in
+To change them from a browser, run [`blat/server`](../blat/server/) on a
+computer with Bluetooth, open its page, and pick the X4. The code is in
 `src/Settings.*`, `src/ble/Remote.*` (the blat device) and `src/ble/Radio.*`
 (the NimBLE server both protocols share).
 

@@ -1,0 +1,28 @@
+{
+  "name": "blat-server",
+  "private": true,
+  "description": "blat host: connects to blat devices over Bluetooth LE and serves a web page to read and change their settings. See README.md.",
+  "type": "module",
+  "bin": {
+    "blat-server": "src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/cli.ts",
+    "dev": "node src/cli.ts --dev",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@stoprocent/noble": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  }
+}

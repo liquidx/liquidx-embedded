@@ -19,7 +19,7 @@ other, with implementations for several hosts. These use a plain name.
 | Folder | What | Notes |
 | --- | --- | --- |
 | [`blit/`](blit/) | [blit protocol](blit/PROTOCOL.md): pixels to low-power displays over BLE, button presses back | JS host library, web demo, Chrome extension, simulated display. The X4 is a display. |
-| [`blat/`](blat/) | [blat](blat/PROTOCOL.md): BLE Attributes Transfer: settings, Wi-Fi, actions and files, declared by the device firmware. Sister to blit | Draft. Firmware library with native tests; the X4 serves its settings with it. No host app yet. |
+| [`blat/`](blat/) | [blat](blat/PROTOCOL.md): BLE Attributes Transfer: settings, Wi-Fi, actions and files, declared by the device firmware. Sister to blit | Draft. Firmware library with native tests; the X4 serves its settings with it. A Node server is the host, with a web page for each device. |
 
 ## Conventions
 

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>blat devices</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>blat</h1>
+      <span class="sub">settings over Bluetooth LE</span>
+      <span id="link-state" class="pill" hidden>Server offline</span>
+    </header>
+    <main>
+      <aside id="devices" aria-label="Devices"></aside>
+      <section id="device" aria-live="polite"></section>
+    </main>
+    <div id="toast" role="status" hidden></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

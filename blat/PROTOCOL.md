@@ -4,8 +4,8 @@
 plane for small devices over BLE.
 
 **Status: draft.** The device side is implemented as a library
-([`firmware/`](firmware/)), used by the X4 for its settings; no host
-implements it yet beyond the Python one in its tests. See
+([`firmware/`](firmware/)), used by the X4 for its settings, and the host
+side as a Node server with a web page ([`server/`](server/)). See
 [Implementations](#implementations).
 
 blat lets a **host** (a browser, a phone, a server) see and change what a
@@ -861,19 +861,18 @@ how to draw each [control type](#control-types). It doesn't know what any
 device can do until the device tells it, and it keeps no list of what to
 expose: that came from the firmware.
 
-Two ways to drive a device, sharing one JS library (a `protocol.js` and a
-simulated device, like blit's `js/`):
+Two ways to drive a device:
 
 ```
  (a) one person, one device, nothing to run
      browser ── Web Bluetooth ──► device
 
- (b) a server near the devices
-     browser ── HTTPS / WebSocket ──► blat server ── BLE (noble) ──► devices
-                                       │
-                                       ├─ device list (seen, remembered)
-                                       ├─ schema cache (by CRC)
-                                       └─ audit log
+ (b) a server near the devices ([server/](server/))
+     browser ── HTTP + server-sent events ──► blat server ── BLE (noble) ──► devices
+                                               │
+                                               ├─ device list (seen, remembered)
+                                               ├─ remembered host keys
+                                               └─ schema cache (by CRC)
 ```
 
 (a) is the "settings page for my gadget" case: open a page, pick the device,
@@ -881,11 +880,12 @@ get a form. It needs Chrome or Edge (desktop or Android); Safari and iOS
 have no Web Bluetooth.
 
 (b) puts a server where [`blit/server`](../blit/server/) runs (a Pi or Mac
-mini with a Bluetooth adapter). It connects to devices on demand, and
-relays blat to browsers over WebSocket using the
-[stream framing](#stream-transports). The browser runs the same page as in
-(a), with a WebSocket instead of Web Bluetooth underneath, so there's one UI
-to build.
+mini with a Bluetooth adapter). The server is the blat host: it connects to
+devices, pairs, holds the keys, and gives browsers a JSON API over the
+devices' schemas and values, with server-sent events for live changes. The
+browser never speaks blat, so it needs no Web Bluetooth and no crypto, and
+the keys never leave the server. The form is generated from the schema in
+both cases, so (a) can reuse (b)'s rendering.
 
 **Authentication through a bridge.** The server is the host the device
 authenticates, and it holds the session keys; browser to server is ordinary
@@ -926,17 +926,18 @@ In order; each step is usable by itself.
 
 1. **Firmware library**, with native tests and a simulated device.
    *Done: [`firmware/`](firmware/).*
-2. **JS library and simulated device**: request/reply, schema parser, value
-   codecs, transfers (reusing blit's), authentication and sealing, a
-   `sim-device.js` with a sample schema that prints its code. Tests like
-   `blit/js/test`, including the RFC 9382 test vectors.
+2. **Host library**: request/reply, schema parser, value codecs, transfers,
+   authentication and sealing. *Done in TypeScript for Node:
+   [`server/src/blat/`](server/src/blat/), tested against the firmware's
+   simulated device. A browser build needs its crypto moved off
+   `node:crypto`.* Still to do: the RFC 9382 test vectors.
 3. **Web Bluetooth page** with the generic form renderer. Works against the
    simulated device first.
 4. **X4 firmware**: the [controls table](#declaring-controls-in-firmware)
    for its settings, the code screen, and a second GATT service next to
    `CastServer`. *Done, except the QR code.*
-5. **Server**: BLE bridge (from `blit/server`), WebSocket relay, the pages
-   above.
+5. **Server**: the host over BLE, a JSON API and the device page.
+   *Done: [`server/`](server/), except per-user access and the audit log.*
 6. **Files**: `dir` control for the X4's SD images.
 7. **Wi-Fi**: on an ESP32 that uses it (the M5StickS3), with `wifi.scan` and
    `wifi.connect`.
@@ -975,3 +976,4 @@ In order; each step is usable by itself.
 | --- | --- | --- |
 | [`firmware/`](firmware/) | device library (C++, ESP32, Arduino + NimBLE) | Declaration format, values and storage, the protocol, pairing and sealing. Native tests, including a Python host and a simulated device. |
 | [`xteink-x4-platformio`](../xteink-x4-platformio/) (`src/Controls.h`, `src/Settings.*`, `src/ble/Remote.*`) | device | Its settings, battery and a restart action, while the Bluetooth app is open. Shows the pairing code on screen. |
+| [`server/`](server/) | host (TypeScript, Node, noble) | Scans, connects, pairs and resumes; serves a web page generated from each device's schema. Tested against the simulated device. |

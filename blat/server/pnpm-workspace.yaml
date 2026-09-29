@@ -1,0 +1,7 @@
+allowBuilds:
+  '@stoprocent/noble': true
+  '@stoprocent/bluetooth-hci-socket': true
+  esbuild: true
+  # Only for noble's HCI-over-UART/USB bindings, which blat-server doesn't use.
+  '@serialport/bindings-cpp': false
+  usb: false
