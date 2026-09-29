@@ -37,38 +37,133 @@ both. Neither needs the other.
 
 All integers are little-endian.
 
-## Does this already exist?
+## Related protocols
 
-Mostly in pieces. Nothing found does the whole job: a self-describing schema
-of typed controls, plus files, plus a transport a browser can use through
-Web Bluetooth.
+Protocols that do part of what blat does, and the concepts blat shares with
+each.
 
-| Prior art | What it does | Why not just use it |
-| --- | --- | --- |
-| **Improv Wi-Fi** (ESPHome) | Tiny open GATT protocol to send SSID and password, get back a URL. Works from Web Bluetooth. | Wi-Fi only, no settings, no files, no security beyond "be nearby". A good model for how small the Wi-Fi part can be. |
-| **ESP-IDF provisioning** (`wifi_prov_mgr`, protocomm) | Protobuf over GATT, with custom endpoints and real security (`security2` is SRP6a + AES-GCM with a proof-of-possession code). | Espressif-only, protobuf on both sides, and the custom endpoints are opaque bytes: no schema, so no generic UI. The security design is worth copying. |
-| **SMP / MCUmgr** (Zephyr, Nordic, MCUboot) | Request/response over GATT with an 8-byte header and CBOR bodies. Groups for firmware images, a filesystem, **settings**, stats, logs, shell. Has Web Bluetooth clients. | The closest match. But settings are untyped key/value blobs: the host must already know what exists and what it means. CBOR and Zephyr's settings subsystem are heavy outside Zephyr. Worth borrowing its header and its firmware upload group rather than reinventing them. |
-| **Plain GATT**: a characteristic per setting, with Characteristic Presentation Format and User Description descriptors | The "Bluetooth-native" way. Generic BLE apps (nRF Connect) can show them. | The GATT table is fixed at boot, each handle costs RAM, discovery is slow, there's no atomic multi-setting write, no enums or ranges, and no files. |
-| **Object Transfer Service** (Bluetooth SIG) | Standard file-like objects over BLE. | Needs L2CAP connection-oriented channels, which Web Bluetooth doesn't have. |
-| **Matter** commissioning (BTP over GATT) | Hands a device network credentials, very securely. | Huge. Only commissioning; everything else happens over IP. |
-| **HomeKit (HAP over BLE)** | Typed characteristics with metadata (min, max, step, unit). | Closed, certification-bound, Apple-only hosts. The metadata model is good. |
-| **Shelly Gen2 / Mongoose OS BLE RPC** | JSON-RPC over three GATT characteristics. Shelly uses it for setup. | JSON on the device, and still no schema: the host must know the methods. |
-| **ESPHome entities** (native API is TCP, not BLE) | A device declares entities: switch, number, select, text, button, sensor. Home Assistant renders them. | Not over BLE. But it's the proof that a small set of typed entities covers almost everything, and the [control types](#control-types) below follow it. |
-| **Nordic UART Service** | A serial pipe over GATT. | A pipe, not a protocol. Fine as a debug fallback. |
+### blit
 
-**Recommendation:** write blat, but small, and steal:
+blat's sister protocol in this repo: pixels to low-power displays over BLE.
 
-- the **entity model** from ESPHome and HomeKit (typed controls with ranges
-  and units),
-- the **transfer and flow control** from blit (already implemented on the X4,
-  in JS, and in the Node server in this repo),
-- the **security** from ESP-IDF `security2` / Matter: a PAKE (password
-  authenticated key exchange) keyed by a code the user reads off the device,
-  here [SPAKE2](https://www.rfc-editor.org/rfc/rfc9382) with the code shown
-  on the device's screen and in a QR code,
-- and **defer firmware updates** to SMP/MCUboot or ESP-IDF OTA rather than
-  inventing a bootloader story. A blat `file` control can carry an image, but
-  verifying and swapping images is a separate problem those already solve.
+- The GATT layout: an Info read, host-to-device writes, and separate
+  notifications for replies and for events
+  ([transport](#transport-bluetooth-le-gatt)).
+- Chunked [transfers](#transfers) with an offset per chunk, and a
+  `window` of chunks per ack as flow control for writes without response.
+- Caps as TLV records that hosts skip when they don't know them
+  ([Info](#info)).
+- The same [stream framing](#stream-transports) for UART, USB and
+  WebSocket.
+- Principles: fixed binary headers, declared limits, idle is free.
+
+### SMP / MCUmgr (Zephyr, Nordic, MCUboot)
+
+Request and response over GATT with an 8-byte header and CBOR bodies, in
+groups for firmware images, a filesystem, settings, stats, logs and a shell.
+
+- A request/response header with an op and a sequence number
+  ([requests](#requests), [replies](#replies)).
+- A settings group: reading and writing values by key, which blat's
+  [get and set](#requests) also do.
+- A filesystem group, like blat's [`file` and `dir`
+  controls](#control-types).
+- Firmware upload and image management, which blat leaves to it
+  ([firmware updates](#firmware-updates)).
+
+### ESPHome entities
+
+A device declares its entities (switch, number, select, text, button,
+sensor) and Home Assistant draws a UI for them. Its native API runs over
+TCP, not BLE.
+
+- A device describing its own controls, so a generic host can render them
+  ([schema](#schema)).
+- A small set of typed controls: `bool`, `int`, `enum`, `text`, `action`
+  map onto switch, number, select, text, button ([control
+  types](#control-types)).
+- Read-only sensors that push their state, like blat's `readOnly` and
+  `live` [flags](#flags).
+- Declaring entities in the firmware's own config
+  ([declaring controls](#declaring-controls-in-firmware)).
+
+### HomeKit Accessory Protocol over BLE
+
+Typed characteristics with metadata, over GATT, for Apple hosts.
+
+- Metadata per value: minimum, maximum, step and unit
+  ([attributes](#attributes)).
+- Pairing with a setup code, shown or printed on the accessory, using a
+  PAKE (SRP) ([pairing with a code](#pairing-with-a-code)).
+- Permissions per characteristic, like blat's [access
+  levels](#access-levels).
+- Notifications when a value changes ([events](#events)).
+
+### ESP-IDF provisioning (`wifi_prov_mgr`, protocomm)
+
+Espressif's protobuf-over-GATT protocol for handing a device Wi-Fi
+credentials, with custom endpoints.
+
+- A proof-of-possession code and a PAKE (`security2`: SRP6a) so the code
+  never goes over the air ([authentication](#authentication)).
+- Encrypting every message after the handshake (AES-GCM there, AES-CCM in
+  blat's [sealing](#sealing)).
+- Wi-Fi scan, then send SSID and password, then report the state
+  (`wifi.scan`, `wifi.connect`, `wifi.state` among the [well-known
+  keys](#well-known-keys)).
+- A QR code carrying the device and its code ([the QR code](#the-qr-code)).
+
+### Matter commissioning (BTP over GATT)
+
+How a Matter device gets its network credentials over BLE before
+everything else moves to IP.
+
+- A setup code on a label or screen, in digits and as a QR code
+  ([the QR code](#the-qr-code)).
+- SPAKE2+ on P-256 with the same M and N points blat's
+  [SPAKE2](#pairing-with-a-code) uses.
+- A commissioning window that opens on user action and times out
+  ([listening mode](#listening-mode)).
+
+### Improv Wi-Fi (ESPHome)
+
+A tiny open GATT protocol to send SSID and password and get back a URL.
+Works from Web Bluetooth.
+
+- Wi-Fi provisioning from a web page, with no app to install
+  ([server and web interface](#server-and-web-interface)).
+- Requiring a button press on the device before accepting credentials
+  ([listening mode](#listening-mode)).
+- State and error reporting while the device joins the network
+  (`wifi.state`).
+
+### Shelly Gen2 / Mongoose OS BLE RPC
+
+JSON-RPC over three GATT characteristics; Shelly devices use it for setup.
+
+- Requests and replies framed over GATT writes and notifications, with a
+  length so bodies can span several ([transfers](#transfers)).
+- Named methods with params, like blat's [actions](#control-types) and
+  `invoke`.
+
+### Bluetooth SIG: GATT descriptors and Object Transfer Service
+
+The Bluetooth-native ways to describe values and move files.
+
+- Characteristic Presentation Format and User Description descriptors: a
+  type, unit and label per value, which blat carries in its
+  [schema](#schema) instead of one characteristic per setting.
+- Object Transfer Service: named objects with sizes, read and written in
+  chunks, like blat's [`file` and `dir` controls](#control-types) and
+  [transfers](#transfers). OTS needs L2CAP channels; blat uses GATT only, so
+  Web Bluetooth can use it.
+
+### Nordic UART Service
+
+A serial pipe over two GATT characteristics.
+
+- A byte stream over BLE, which blat's [stream
+  framing](#stream-transports) could run on.
 
 ## Principles
 
