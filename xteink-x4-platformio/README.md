@@ -200,6 +200,39 @@ still accepts v1 frame headers, but Info is v2 caps, so senders need the
 current blit library. The receiver is `src/ble/CastServer.*` (NimBLE) and
 `src/apps/BleApp.*`; the grey refresh is `Shell::presentGray`.
 
+### Settings over Bluetooth (blat)
+
+While the Bluetooth app is open, a host can also read and change the X4's
+settings over [blat](../blat/PROTOCOL.md), blit's sister protocol, on the
+same connection:
+
+- **Anyone** in range can read the settings, the battery level and the
+  firmware version.
+- **Changing** them needs a paired host. When a new host asks to pair, the
+  X4 shows a six-digit **pairing code** in place of the frame, which the
+  user types on the host. The code never goes over the air; it lasts two
+  minutes, allows three tries, and too many wrong guesses lock pairing out
+  for a minute (then longer).
+- A host can ask to be **remembered**, and then reconnects without a code.
+  **Restart** still needs a fresh code, i.e. someone at the device.
+- Changes made on the device show up on a connected host straight away, and
+  the other way round.
+
+Everything a host can see or change is declared in one table,
+[`src/Controls.h`](src/Controls.h): each setting's type, options, default,
+NVS key and access level. The Settings app draws its pages from the same
+table. Add a setting there and it appears on the device and on hosts; leave
+it out and hosts can't reach it. The format is described in
+[`blat/firmware`](../blat/firmware/README.md).
+
+Settings live in the NVS namespace `settings`. The first boot after
+updating moves the old values (saved as option indices in `shell`) across.
+
+There's no host app for blat yet: the only host so far is the Python one in
+[`blat/firmware/test`](../blat/firmware/test/). The code is in
+`src/Settings.*`, `src/ble/Remote.*` (the blat device) and `src/ble/Radio.*`
+(the NimBLE server both protocols share).
+
 ## Status / next
 
 - [x] Landscape shell, key mapping
@@ -214,5 +247,9 @@ current blit library. The receiver is `src/ble/CastServer.*` (NimBLE) and
       hardware)
 - [ ] Wi-Fi: scan, join, save credentials (start with `/wifi.txt` on SD)
 - [x] Persist settings
+- [x] Settings over Bluetooth ([blat](../blat/)): read by anyone, changed by
+      a host paired with an on-screen code (built and tested against a
+      simulated host, not yet on hardware)
+- [ ] blat: QR code on the pairing screen, and a host page to use it
 - [ ] Persist last app
 - [ ] On-device keyboard, or a hotspot + web form for entering Wi-Fi details

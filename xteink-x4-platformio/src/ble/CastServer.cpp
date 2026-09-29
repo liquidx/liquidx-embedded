@@ -9,14 +9,15 @@
 #include <cstring>
 #include <utility>
 
+#include "Radio.h"
+
 namespace cast {
 
 CastServer server;
 
 namespace {
 
-// blit/PROTOCOL.md#transport-bluetooth-le-gatt (repo root)
-constexpr const char* kServiceUuid = "b1ec0000-5f3a-4e62-9a47-0c3d8e5f2a10";
+// blit/PROTOCOL.md#transport-bluetooth-le-gatt (repo root); the service is in CastServer.h.
 constexpr const char* kInfoUuid = "b1ec0001-5f3a-4e62-9a47-0c3d8e5f2a10";
 constexpr const char* kControlUuid = "b1ec0002-5f3a-4e62-9a47-0c3d8e5f2a10";
 constexpr const char* kDataUuid = "b1ec0003-5f3a-4e62-9a47-0c3d8e5f2a10";
@@ -51,7 +52,6 @@ constexpr size_t kV1HeaderBytes = 21;
 constexpr size_t kV2HeaderBytes = 29;
 constexpr uint16_t kMaxSide = 2048;
 constexpr uint16_t kPanelW = 800, kPanelH = 480;
-constexpr uint16_t kPreferredMtu = 517;
 constexpr size_t kAttOverhead = 3;   // ATT write opcode + handle
 constexpr size_t kOffsetBytes = 4;   // Data write prefix
 
@@ -83,18 +83,6 @@ uint16_t chunkFor(const uint16_t mtu) {
 
 uint16_t peerMtu(const uint16_t connHandle) { return NimBLEDevice::getServer()->getPeerMTU(connHandle); }
 
-class ServerCallbacks : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer*, NimBLEConnInfo& info) override { server.onConnect(info.getConnHandle()); }
-  void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason) override {
-    LOG_INF("BLE", "Disconnected (reason %d)", reason);
-    server.onDisconnect();
-  }
-  void onMTUChange(uint16_t mtu, NimBLEConnInfo&) override { LOG_INF("BLE", "MTU %u", mtu); }
-  void onConnParamsUpdate(NimBLEConnInfo& info) override {
-    LOG_INF("BLE", "Connection interval %.2f ms", info.getConnInterval() * 1.25f);
-  }
-};
-
 class InfoCallbacks : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* chr, NimBLEConnInfo& info) override {
     uint8_t caps[128];
@@ -116,7 +104,6 @@ class DataCallbacks : public NimBLECharacteristicCallbacks {
   }
 };
 
-ServerCallbacks serverCallbacks;
 InfoCallbacks infoCallbacks;
 ControlCallbacks controlCallbacks;
 DataCallbacks dataCallbacks;
@@ -152,51 +139,24 @@ uint32_t crc32(const uint8_t* data, const size_t length, uint32_t crc) {
 
 // --- Lifecycle (main loop) -----------------------------------------------------
 
-bool CastServer::begin() {
-  if (running_) return true;
-  if (!NimBLEDevice::init("")) return false;
-  const uint8_t* addr = NimBLEDevice::getAddress().getVal();  // little-endian
-  snprintf(name_, sizeof(name_), "X4-%02X%02X", addr[1], addr[0]);
-  NimBLEDevice::setDeviceName(name_);
-  NimBLEDevice::setMTU(kPreferredMtu);
-
-  NimBLEServer* gatt = NimBLEDevice::createServer();
-  gatt->setCallbacks(&serverCallbacks, false);
+void CastServer::attach(NimBLEServer* gatt) {
   NimBLEService* service = gatt->createService(kServiceUuid);
   service->createCharacteristic(kInfoUuid, NIMBLE_PROPERTY::READ)->setCallbacks(&infoCallbacks);
   service->createCharacteristic(kControlUuid, NIMBLE_PROPERTY::WRITE)->setCallbacks(&controlCallbacks);
   service->createCharacteristic(kDataUuid, NIMBLE_PROPERTY::WRITE_NR)->setCallbacks(&dataCallbacks);
   statusChar = service->createCharacteristic(kStatusUuid, NIMBLE_PROPERTY::NOTIFY);
   eventChar = service->createCharacteristic(kEventUuid, NIMBLE_PROPERTY::NOTIFY);
-  gatt->start();
-
-  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-  adv->addServiceUUID(kServiceUuid);
-  adv->setName(name_);
-  adv->enableScanResponse(true);
-  if (!adv->start()) {
-    LOG_ERR("BLE", "Advertising failed to start");
-    NimBLEDevice::deinit(true);
-    return false;
-  }
-  running_ = true;
-  LOG_INF("BLE", "Advertising as %s", name_);
-  return true;
 }
 
-void CastServer::end() {
-  if (!running_) return;
-  NimBLEDevice::deinit(true);  // disconnects, stops advertising, frees the stack
+void CastServer::detach() {
   statusChar = nullptr;
   eventChar = nullptr;
-  running_ = false;
   connected_ = false;
   receiving_ = false;
   portENTER_CRITICAL(&handoffLock);
   ready_ = false;
   base_.link = 0;
   portEXIT_CRITICAL(&handoffLock);
-  LOG_INF("BLE", "Stopped");
 }
 
 void CastServer::hostName(char* out, const size_t size) const {
@@ -258,7 +218,7 @@ void CastServer::sendPower() {
 }
 
 void CastServer::disconnect() {
-  if (!running_ || !connected_) return;
+  if (!connected_) return;
   NimBLEDevice::getServer()->disconnect(connHandle_.load());
 }
 
@@ -290,8 +250,9 @@ size_t CastServer::fillCaps(uint8_t* out, const size_t size, const uint16_t mtu)
     return p;
   };
 
-  const size_t nameLength = strlen(name_);
-  memcpy(tag(kTagName, nameLength), name_, nameLength);
+  const char* name = radio::name();
+  const size_t nameLength = strlen(name);
+  memcpy(tag(kTagName, nameLength), name, nameLength);
   p += nameLength;
   put16(put16(tag(kTagPanel, 4), kPanelW), kPanelH);
   p += 4;
@@ -329,14 +290,6 @@ size_t CastServer::fillCaps(uint8_t* out, const size_t size, const uint16_t mtu)
 // --- NimBLE callbacks (BLE task) --------------------------------------------
 
 void CastServer::onConnect(const uint16_t connHandle) {
-  // Transfer rate is set by the link: ask for the shortest connection interval
-  // Apple hosts accept (15–30 ms; they require max ≥ min + 15 ms, in 1.25 ms
-  // units) and full-size link-layer packets (Data Length Extension, else each
-  // 508-byte write goes out as ~19 small packets). macOS still picks 30 ms.
-  // Don't request the 2M PHY: macOS drops the link (supervision timeout).
-  NimBLEServer* gatt = NimBLEDevice::getServer();
-  gatt->updateConnParams(connHandle, 12, 24, 0, 400);
-  gatt->setDataLen(connHandle, 251);
   connHandle_ = connHandle;
   link_++;
   wantsKeys_ = false;
@@ -352,7 +305,6 @@ void CastServer::onDisconnect() {
   connected_ = false;
   receiving_ = false;
   activity_ = true;
-  NimBLEDevice::startAdvertising();
 }
 
 void CastServer::onControl(const uint8_t* data, const size_t length) {

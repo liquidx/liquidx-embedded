@@ -8,6 +8,9 @@
 // The title pill shows the link status. Frames are saved to /images unless the
 // sender turns persist off. Up / Down / Select go to the host; Back leaves the
 // app, which turns the radio off.
+//
+// While open it also takes settings from a paired blat host (blat/PROTOCOL.md),
+// and shows the pairing code when a new host asks for one.
 class BleApp : public App {
  public:
   const char* name() const override { return "Bluetooth"; }
@@ -34,6 +37,7 @@ class BleApp : public App {
   void pollBattery();
   bool loadLastFrame();
   void drawFrame(GfxRenderer& r, const layout::Rect& area) const;
+  void renderCode(GfxRenderer& r, const layout::Rect& area, bool chrome, const char* code);
   bool persist(const cast::FrameHeader& header, char* path, size_t pathSize);
 
   cast::Buffer frame_;         // the last full frame received, pixels as sent

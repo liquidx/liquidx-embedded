@@ -5,7 +5,9 @@
 #include "../shell/App.h"
 
 // Settings: a list of rows with their current values. Select opens a row's
-// page: a vertical choice (Refresh, Sleep after, Clock) or About.
+// page: a vertical choice (Refresh, Sleep after, Clock, Frame sleep) or About.
+// Choice pages are drawn from the control's declaration in Controls.h: its
+// label, help and options.
 class SettingsApp : public App {
  public:
   const char* name() const override { return "Settings"; }
@@ -26,7 +28,7 @@ class SettingsApp : public App {
   void renderAbout(GfxRenderer& r, const layout::Rect& area, bool chrome);
 
   Page page_ = Page::List;
-  const settings::Choice* choice_ = nullptr;  // open on Page::Choice
+  blat::Id choice_ = 0;  // open on Page::Choice
   ui::ListView list_;
   ui::InfoView info_;
   char storage_[24] = "...";

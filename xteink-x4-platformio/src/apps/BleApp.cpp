@@ -15,6 +15,8 @@
 
 #include "../Fonts.h"
 #include "../Settings.h"
+#include "../ble/Radio.h"
+#include "../ble/Remote.h"
 #include "ImageApp.h"
 
 namespace {
@@ -139,15 +141,18 @@ void BleApp::onOpen() {
   sentBattery_ = 255;
   lastBatteryPollMs_ = millis() - kBatteryPollMs;  // poll now, for the caps
   pollBattery();
-  if (!cast::server.begin()) LOG_ERR("BLE", "Couldn't start the cast server");
+  if (!radio::begin()) LOG_ERR("BLE", "Couldn't start Bluetooth");
 }
 
 void BleApp::onClose() {
   donePending_ = false;
-  cast::server.end();
+  radio::end();
 }
 
-bool BleApp::takeActivity() { return cast::server.takeActivity(); }
+bool BleApp::takeActivity() {
+  const bool cast = cast::server.takeActivity();
+  return remote::takeActivity() || cast;
+}
 
 uint32_t BleApp::takeSleepRequest() {
   if (donePending_) return 0;  // the host hasn't been told yet
@@ -176,7 +181,7 @@ Result BleApp::handle(const Action action) {
 }
 
 BleApp::Status BleApp::status() const {
-  if (!cast::server.running()) return Status::Unavailable;
+  if (!radio::running()) return Status::Unavailable;
   if (cast::server.receiving()) return Status::Receiving;
   if (!cast::server.connected()) return Status::Listening;
   if (cast::server.failed()) return Status::Failed;
@@ -215,6 +220,7 @@ void BleApp::pollBattery() {
   const uint8_t percent = std::min<uint16_t>(powerManager.getBatteryPercentage(), 100);
   const bool usb = gpio.isUsbConnected();
   cast::server.setBattery(percent, usb);
+  settings::set(settings::kBattery, percent);  // blat hosts see it as power.battery
   const bool first = sentBattery_ == 255;
   if (!first && std::abs(percent - sentBattery_) < kBatteryStep && usb == sentUsb_) return;
   if (!first) cast::server.sendPower();
@@ -224,6 +230,14 @@ void BleApp::pollBattery() {
 
 Result BleApp::tick() {
   pollBattery();
+  remote::poll();
+  // A blat host may have changed settings. Frame sleep is read here; the rest
+  // are read where they're used.
+  if (settings::values().takeHostChanges()) {
+    cast::server.setFrameSleep(settings::value(settings::kFrameSleep) != 0);
+  }
+  // The pairing code appeared or went away.
+  if (remote::takeCodeChange()) return Result::CleanRedraw;
   cast::FrameHeader header;
   if (!cast::server.takeFrame(header, frame_, region_)) {
     // Redraw (a fast refresh) only when the status on screen changes: the
@@ -333,6 +347,7 @@ void BleApp::render(GfxRenderer& r, const layout::Rect& area, const bool chrome)
   shownStatus_ = status();
   char text[40];
   statusText(text, sizeof(text));
+  if (const char* code = remote::code()) return renderCode(r, area, chrome, code);
 
   // A frame fills the card (the last received, or the last saved one); the
   // title pill over it shows the link status. Full screen shows just the frame.
@@ -347,10 +362,29 @@ void BleApp::render(GfxRenderer& r, const layout::Rect& area, const bool chrome)
   const int textW = r.getTextWidth(fonts::MEDIUM_22, text);
   const int midY = area.y + area.h / 2;
   ui::drawTextAt(r, fonts::MEDIUM_22, area.x + (area.w - textW) / 2, midY, text);
-  if (cast::server.running()) {
-    const int nameW = r.getTextWidth(fonts::SMALL_15, cast::server.name());
-    ui::drawTextAt(r, fonts::SMALL_15, area.x + (area.w - nameW) / 2, midY + 30, cast::server.name());
+  if (radio::running()) {
+    const int nameW = r.getTextWidth(fonts::SMALL_15, radio::name());
+    ui::drawTextAt(r, fonts::SMALL_15, area.x + (area.w - nameW) / 2, midY + 30, radio::name());
   }
+}
+
+// A host asked to pair (blat): show the code for its user to type in, "482 913",
+// until it's used or expires.
+void BleApp::renderCode(GfxRenderer& r, const layout::Rect& area, const bool chrome, const char* code) {
+  showingFrame_ = false;
+  grayShown_ = false;
+  ui::drawTitle(r, area, chrome ? "Bluetooth / Pairing" : nullptr, &pill_);
+  char spaced[8];
+  snprintf(spaced, sizeof(spaced), "%.3s %.3s", code, code + 3);
+  const int midY = area.y + area.h / 2;
+  const char* heading = "Pairing code";
+  const int headingW = r.getTextWidth(fonts::MEDIUM_22, heading);
+  ui::drawTextAt(r, fonts::MEDIUM_22, area.x + (area.w - headingW) / 2, midY - 80, heading);
+  const int codeW = r.getTextWidth(fonts::DISPLAY_136, spaced);
+  ui::drawTextAt(r, fonts::DISPLAY_136, area.x + (area.w - codeW) / 2, midY + 50, spaced);
+  const char* hint = "Enter it on the device that's connecting";
+  const int hintW = r.getTextWidth(fonts::SMALL_15, hint);
+  ui::drawTextAt(r, fonts::SMALL_15, area.x + (area.w - hintW) / 2, midY + 100, hint);
 }
 
 // Read a 1- or 2-bit BMP (what persist() writes) into frame_ as mono1 or
