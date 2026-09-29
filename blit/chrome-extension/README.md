@@ -118,8 +118,8 @@ A fresh frame is sent 0.4 s after each press, so the result shows up on the
 display. Taps from a touch display (`pointer` events) are mapped back through
 the crop and scaling to the spot on the page, and clicked.
 
-The X4 firmware speaks protocol v1 today, which has no button events. Try
-this with the **Simulator** in the session window.
+On the X4, Up, Down and Select are forwarded (Back stays on the device).
+Without hardware, try this with the **Simulator** in the session window.
 
 ### Keep working after the page navigates
 

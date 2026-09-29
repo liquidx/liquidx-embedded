@@ -115,8 +115,7 @@ node src/cli.ts https://example.com --zoom 2
   area: a larger one is cropped, so it goes whole), PackBits when it's smaller. One frame is in
   flight at a time; one asked for meanwhile is taken right after.
 - **Caps.** When the display changes its frame area or formats (a `caps`
-  event), the page is laid out again and a whole frame sent. v1 displays have
-  no caps events, so their Info is re-read before every frame.
+  event), the page is laid out again and a whole frame sent.
 - **Sleep and reconnects.** With `--sleep`, the display may disconnect to
   sleep after a frame. The next frame reconnects, retrying for 30 s. So does a
   frame after an unexpected disconnect.

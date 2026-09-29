@@ -43,25 +43,21 @@ test('caps survive a TLV round trip, and unknown tags are skipped', () => {
   assert.deepEqual(parseCaps(withUnknown), caps);
 });
 
-test('v1 JSON Info parses into the same caps shape', () => {
+test('v1 displays (JSON Info) and older versions are refused', () => {
   const json = '{"v":1,"name":"X4-1A2B","w":716,"h":480,"fullW":800,"fullH":480,"chunk":508,"window":16,"maxBytes":65536,"formats":[1],"frameSleep":true}';
-  const caps = parseCaps(new TextEncoder().encode(json));
-  assert.equal(caps.version, 1);
-  assert.equal(caps.width, 716);
-  assert.deepEqual(caps.panel, { width: 800, height: 480 });
-  assert.equal(caps.chunk, 508);
-  assert.deepEqual(caps.formats, [1]);
-  assert.equal(caps.features.frameSleep, true);
-  assert.equal(caps.regionAlign, 0);
+  assert.throws(() => parseCaps(new TextEncoder().encode(json)), /v1/);
+  assert.throws(() => parseCaps(Uint8Array.of(1, 0x03, 4, 16, 0, 16, 0)), /v1/);
 });
 
-test('begin headers encode and parse (v1 and v2)', () => {
-  const v1 = encodeBegin({ version: 1, width: 716, height: 480, byteLength: 43440, crc: 0xdeadbeef, nextFrameSeconds: 60, name: 'clock', persist: true });
-  assert.equal(v1.length, 21 + 5);
+test('begin headers encode and parse', () => {
+  const full = encodeBegin({ width: 716, height: 480, byteLength: 43440, crc: 0xdeadbeef, nextFrameSeconds: 60, name: 'clock', persist: true });
+  assert.equal(full.length, 29 + 5);
   assert.deepEqual(
-    { ...parseBegin(v1) },
-    { version: 1, format: 1, encoding: 0, persist: true, region: false, hold: false, refresh: 0, width: 716, height: 480, x: 0, y: 0, byteLength: 43440, crc: 0xdeadbeef, nextFrameSeconds: 60, name: 'clock' },
+    { ...parseBegin(full) },
+    { version: 2, format: 1, encoding: 0, persist: true, region: false, hold: false, refresh: 0, width: 716, height: 480, x: 0, y: 0, byteLength: 43440, crc: 0xdeadbeef, nextFrameSeconds: 60, name: 'clock' },
   );
+  // A v1 header (21 bytes) is too short to parse.
+  assert.equal(parseBegin(full.subarray(0, 21)), null);
   const v2 = encodeBegin({ format: FORMAT.GRAY4, encoding: 1, region: true, hold: true, refresh: 2, width: 64, height: 32, x: 8, y: 16, byteLength: 99, crc: 1, name: '' });
   assert.equal(v2.length, 29);
   const h = parseBegin(v2);
@@ -169,13 +165,35 @@ test('end to end: key presses and caps changes reach the host', async () => {
   assert.equal(blit.preferredFormat(), FORMAT.GRAY2);
 });
 
-test('end to end: a v1 display gets v1 headers and mono1 only', async () => {
-  const { display, blit } = await connected({ version: 1, width: 48, height: 16 });
-  assert.equal(blit.caps.version, 1);
-  await blit.sendFrame(frame(FORMAT.MONO1, 48, 16, 0xff), { width: 48, height: 16, regions: true });
-  assert.equal(display.lastHeader.version, 1);
-  assert.equal(display.visible[0], 0);
-  await assert.rejects(blit.sendFrame(frame(FORMAT.GRAY4, 48, 16), { format: FORMAT.GRAY4, width: 48, height: 16 }));
+test('end to end: connecting to a v1 display fails with a clear error', async () => {
+  let closed = false;
+  const v1 = {
+    name: 'X4-1A2B',
+    connected: true,
+    async open() {},
+    async readInfo() {
+      const bytes = new TextEncoder().encode('{"v":1,"w":716,"h":480,"chunk":508,"window":16,"maxBytes":65536}');
+      return new DataView(bytes.buffer);
+    },
+    async control() {
+      throw new Error('a v1 display gets no hello');
+    },
+    close() {
+      closed = true;
+    },
+  };
+  await assert.rejects(new Blit().connectTransport(v1), /speaks blit v1/);
+  assert.equal(closed, true);
+});
+
+test('end to end: the simulated display refuses v1 headers', async () => {
+  const { display, blit } = await connected({ width: 48, height: 16 });
+  const statuses = [];
+  blit.addEventListener('status', (e) => statuses.push(e.detail));
+  const v1 = Uint8Array.of(0x01, 1, 1, 0, 48, 0, 16, 0, 96, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+  display.control(v1);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(statuses.map((s) => [s.event, s.code]), [[3, 1]]); // error: bad header
 });
 
 test('end to end: the display rejects bad frames with errors', async () => {

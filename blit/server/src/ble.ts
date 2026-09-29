@@ -90,7 +90,7 @@ export class NobleTransport {
     return this.peripheral.state === 'connected' && !!this.#chars;
   }
 
-  async open(handlers: TransportHandlers): Promise<{ hasEvents: boolean }> {
+  async open(handlers: TransportHandlers): Promise<void> {
     this.#handlers = handlers;
     const p = this.peripheral;
     try {
@@ -106,19 +106,15 @@ export class NobleTransport {
       return c;
     };
     const chars = {
-      info: need('info'), control: need('control'), data: need('data'), status: need('status'),
-      event: byUuid(CHARACTERISTIC.event), // null: a v1 display
+      info: need('info'), control: need('control'), data: need('data'), status: need('status'), event: need('event'),
     };
     // Listeners live as long as the characteristic objects; reconnecting
     // rediscovers them, so drop any from the last connection first.
     chars.status.removeAllListeners('data').on('data', (d: Buffer) => this.#handlers?.onStatus(asView(d)));
     await chars.status.subscribeAsync();
-    if (chars.event) {
-      chars.event.removeAllListeners('data').on('data', (d: Buffer) => this.#handlers?.onEvent(asView(d)));
-      await chars.event.subscribeAsync();
-    }
+    chars.event.removeAllListeners('data').on('data', (d: Buffer) => this.#handlers?.onEvent(asView(d)));
+    await chars.event.subscribeAsync();
     this.#chars = chars;
-    return { hasEvents: !!chars.event };
   }
 
   // The blit service's characteristics. Asking for the service by UUID

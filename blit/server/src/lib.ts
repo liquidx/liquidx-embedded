@@ -59,7 +59,7 @@ export interface SendResult {
 export interface Transport {
   readonly name: string | null;
   readonly connected: boolean;
-  open(handlers: { onStatus(data: DataView): void; onEvent(data: DataView): void; onDisconnect(): void }): Promise<{ hasEvents: boolean }>;
+  open(handlers: { onStatus(data: DataView): void; onEvent(data: DataView): void; onDisconnect(): void }): Promise<void>;
   readInfo(): Promise<DataView>;
   control(bytes: Uint8Array): Promise<void>;
   data(bytes: Uint8Array): Promise<void>;
