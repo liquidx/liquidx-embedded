@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../ble/CastServer.h"
+#include "../ble/Cast.h"
 #include "../shell/App.h"
 
 // A remote screen over Bluetooth LE (blit/PROTOCOL.md at the repo root). While open,
@@ -33,16 +33,16 @@ class BleApp : public App {
 
   Status status() const;
   void statusText(char* out, size_t size) const;
-  Result showFrame(const cast::FrameHeader& header);
+  Result showFrame(const blit::FrameHeader& header);
   void pollBattery();
   bool loadLastFrame();
   void drawFrame(GfxRenderer& r, const layout::Rect& area) const;
   void renderCode(GfxRenderer& r, const layout::Rect& area, bool chrome, const char* code);
-  bool persist(const cast::FrameHeader& header, char* path, size_t pathSize);
+  bool persist(const blit::FrameHeader& header, char* path, size_t pathSize);
 
-  cast::Buffer frame_;         // the last full frame received, pixels as sent
-  cast::Buffer region_;        // the last region received
-  cast::FrameHeader header_;   // ...the full frame's header
+  blit::Buffer frame_;         // the last full frame received, pixels as sent
+  blit::Buffer region_;        // the last region received
+  blit::FrameHeader header_;   // ...the full frame's header
   bool haveFrame_ = false;
   bool showingFrame_ = false;  // the last render drew a frame, not "Listening"
   bool grayShown_ = false;     // ...and it has greys
@@ -51,9 +51,6 @@ class BleApp : public App {
   Status shownStatus_ = Status::Unavailable;  // what the screen shows now
   uint32_t nextSeconds_ = 0;   // the last frame's next-frame hint
   char lastPath_[96] = "";     // last persisted frame, shown after a restart
-  uint32_t sleepRequest_ = 0;  // seconds
-  bool donePending_ = false;   // send `done` once the frame is on the panel
+  uint32_t sleepRequest_ = 0;  // seconds, sent with `done`
   uint32_t lastBatteryPollMs_ = 0;
-  uint8_t sentBattery_ = 255;  // the level last sent to the host
-  bool sentUsb_ = false;
 };

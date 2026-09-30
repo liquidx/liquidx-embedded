@@ -422,7 +422,8 @@ async function reconnectRemembered() {
 const SIM_MODES = {
   mono: { width: 400, height: 300, formats: [1, 2, 3] },
   gray: { width: 400, height: 300, formats: [3, 2, 1] },
-  x4: { version: 1, width: 716, height: 480, panelWidth: 800, panelHeight: 480, refreshMs: 1200 },
+  // As the X4 firmware: 1-bit first, 4 greys on request, three keys, no touch.
+  x4: { width: 716, height: 480, panelWidth: 800, panelHeight: 480, formats: [1, 2], keys: [1, 2, 5], pointer: false, refreshMs: 1200 },
 };
 
 function drawSim() {

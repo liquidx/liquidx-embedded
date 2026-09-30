@@ -4,10 +4,10 @@ blit sends finished pixels from a **host** (a browser, a phone, a server, a
 Chrome extension) to a small, low-power **display** (an e-paper reader, a
 badge, a stick with an LCD), and sends the display's button presses back.
 
-This document is the spec. Version **2** is described here, with version
-**1** (what the X4 firmware first shipped, formerly "ble-cast") as a subset
-that every host still has to speak. [Compatibility with v1](#compatibility-with-v1)
-lists the differences.
+This document is the spec for version **2**. Version 1 (what the X4 firmware
+first shipped, formerly "ble-cast": JSON Info, a shorter header, no events)
+is retired: displays and hosts speak v2 only, and a host that meets a v1
+display tells its user to update it.
 
 Settings, Wi-Fi, actions and files are out of scope on purpose: they belong
 to the sister protocol [blat](../blat/PROTOCOL.md), which a display can speak
@@ -68,7 +68,7 @@ advertised name is for people (the X4 uses `X4-XXXX`, from the last two bytes
 of its address).
 
 Service `b1ec0000-5f3a-4e62-9a47-0c3d8e5f2a10`. The UUIDs are unchanged from
-ble-cast, so existing displays keep working.
+ble-cast.
 
 | Characteristic | UUID | Properties | Direction | Purpose |
 | --- | --- | --- | --- | --- |
@@ -76,7 +76,7 @@ ble-cast, so existing displays keep working.
 | Control | `b1ec0002-5f3a-4e62-9a47-0c3d8e5f2a10` | write | host → display | [Control ops](#control-ops): begin, commit, cancel, hello |
 | Data | `b1ec0003-5f3a-4e62-9a47-0c3d8e5f2a10` | write without response | host → display | Frame payload chunks |
 | Status | `b1ec0004-5f3a-4e62-9a47-0c3d8e5f2a10` | notify | display → host | [Replies](#status) to control ops and data |
-| Event | `b1ec0005-5f3a-4e62-9a47-0c3d8e5f2a10` | notify | display → host | [Events](#events): caps changes, key presses, taps, battery (v2) |
+| Event | `b1ec0005-5f3a-4e62-9a47-0c3d8e5f2a10` | notify | display → host | [Events](#events): caps changes, key presses, taps, battery |
 
 Status and Event are kept apart on purpose. Status is strictly
 request/reply for the frame in flight, so a host can wait for "the next
@@ -98,11 +98,11 @@ something.
 ## Session
 
 1. **Connect** to a display advertising the service.
-2. **Read Info** and parse it as [caps](#caps). If the first byte is `{`
-   (0x7B), the display speaks v1: see
-   [Compatibility with v1](#compatibility-with-v1).
-3. **Subscribe** to Status, and to Event if the display has it.
-4. **Hello** (v2): write a [hello](#hello-0x04) to Control. The display
+2. **Read Info** and parse it as [caps](#caps). If the first byte is below 2,
+   or is `{` (0x7B, the JSON Info of a v1 display), the display doesn't speak
+   v2: disconnect and say so.
+3. **Subscribe** to Status and Event.
+4. **Hello**: write a [hello](#hello-0x04) to Control. The display
    answers with a `caps` event. It's optional over BLE unless the host wants
    key or pointer events: a display sends those only after a hello that asks
    for them, so it can keep handling its buttons itself until then.
@@ -153,12 +153,12 @@ Rules:
 
 ### Frame header (begin, 0x01)
 
-v2 header: 29 bytes plus the name.
+29 bytes plus the name.
 
 | Offset | Size | Field | Notes |
 | --- | --- | --- | --- |
 | 0 | 1 | `op` | `0x01` |
-| 1 | 1 | `version` | `2`. Send `1` with the [v1 header](#v1-frame-header) to a v1 display. |
+| 1 | 1 | `version` | `2`. Displays reject any other version with error 2. |
 | 2 | 1 | `format` | [Pixel format](#pixel-formats). Must be one of caps `formats`. |
 | 3 | 1 | `encoding` | [Encoding](#encodings) of the payload. `0` = none. |
 | 4 | 1 | `flags` | bit 0 `persist`: save the frame (e.g. to SD).<br>bit 1 `region`: this is a region update at `x`,`y`; the rest of the frame area keeps its pixels.<br>bit 2 `hold`: don't refresh the panel yet, more regions follow. The next frame without `hold` refreshes everything.<br>Other bits reserved. |
@@ -245,8 +245,8 @@ reply.
 
 ### Hello (0x04)
 
-v2. Optional over BLE, unless the host wants key or pointer events. Required
-on stream transports, which have no Info read.
+Optional over BLE, unless the host wants key or pointer events. Required on
+stream transports, which have no Info read.
 
 | Offset | Size | Field |
 | --- | --- | --- |
@@ -256,8 +256,7 @@ on stream transports, which have no Info read.
 | 3 | 1 | `nameLength` (0–32) |
 | 4 | n | `name`: UTF-8 host name, e.g. `Chrome: Grafana`. The display may show it. |
 
-The display replies with a `caps` [event](#events), not a status. A v1 display
-replies with status error 1, which hosts can ignore.
+The display replies with a `caps` [event](#events), not a status.
 
 ### Status
 
@@ -280,12 +279,12 @@ Status notifications are six bytes: `u8 event`, `u8 code`, `u32 value`.
 | 6 | Commit before all bytes arrived | bytes received |
 | 7 | CRC mismatch | |
 | 8 | Couldn't persist (the frame is still shown) | |
-| 9 | Region outside the frame area, misaligned, or with no full frame to patch (v2, see [what a region patches](#frame-header-begin-0x01)) | |
-| 10 | Payload didn't decode to the frame size (v2) | decoded bytes |
+| 9 | Region outside the frame area, misaligned, or with no full frame to patch (see [what a region patches](#frame-header-begin-0x01)) | |
+| 10 | Payload didn't decode to the frame size | decoded bytes |
 
 ## Caps
 
-v2 displays return caps from Info and in `caps` events. The layout is a
+Displays return caps from Info and in `caps` events. The layout is a
 version byte followed by TLV records until the end of the value:
 
 ```
@@ -340,7 +339,7 @@ The display asks and the host follows. Some examples:
 
 ## Events
 
-v2. Notifications on the Event characteristic, sent when something happens.
+Notifications on the Event characteristic, sent when something happens.
 The first byte is the event type. Events are sent only while a host is
 connected and subscribed, and `key` and `pointer` events only after a
 [hello](#hello-0x04) that asks for them. They are **never queued across a
@@ -421,59 +420,13 @@ with a `caps` event. `chunk` and `window` still apply, so a UART display with
 a small RX buffer is protected the same way. On WebSocket each message is one
 binary frame, and the `u16 length` is left out.
 
-## Compatibility with v1
-
-v1 is what `xteink-x4-platformio` first shipped. It is v2 without events,
-hello, regions, encodings or formats other than `mono1`, and with a JSON Info
-and a shorter header. Every host must support v1 displays. A v2 display may
-also accept v1 headers.
-
-**Detecting v1.** Info starts with `{` and is UTF-8 JSON:
-
-```json
-{"v":1,"name":"X4-1A2B","w":716,"h":480,"fullW":800,"fullH":480,
- "chunk":508,"window":16,"maxBytes":65536,"formats":[1],"frameSleep":false}
-```
-
-| JSON | Caps equivalent |
-| --- | --- |
-| `v` | version |
-| `name` | `name` |
-| `w`, `h` | `area` |
-| `fullW`, `fullH` | `panel` |
-| `chunk`, `window`, `maxBytes` | `limits` |
-| `formats` | `formats` |
-| `frameSleep` | `features.frameSleep` (`persist` is always supported) |
-
-A v1 display has no Event characteristic, so there are no key events and no
-caps events. Hosts re-read Info before each frame instead.
-
-### v1 frame header
-
-21 bytes plus the name. Always `mono1`, no encoding, full frames only.
-
-| Offset | Size | Field |
-| --- | --- | --- |
-| 0 | 1 | `op` = `0x01` |
-| 1 | 1 | `version` = 1 |
-| 2 | 1 | `format` = 1 |
-| 3 | 1 | `flags`: bit 0 `persist` |
-| 4 | 2 | `width` |
-| 6 | 2 | `height` |
-| 8 | 4 | `byteLength` |
-| 12 | 4 | `crc32` |
-| 16 | 4 | `nextFrameSeconds` |
-| 20 | 1 | `nameLength` (0–64) |
-| 21 | n | `name` |
-
-Status, Data, commit, cancel, errors 1–8 and sleeping are the same as v2.
-
 ## Implementations
 
 | Where | Role | Speaks |
 | --- | --- | --- |
-| [`xteink-x4-platformio`](../xteink-x4-platformio/) (`src/ble/CastServer.*`, `src/apps/BleApp.*`) | display (Xteink X4, e-paper): `mono1` and `gray2`, PackBits, regions, keys up / down / select | v2 (and v1 headers) |
-| [`js/`](js/) | host library, plus a simulated display | v1, v2 |
+| [`firmware/`](firmware/) | display library (C++, ESP32 and NimBLE, with native tests): every grey and colour format, PackBits, regions, keys, pointer, power | v2 |
+| [`xteink-x4-platformio`](../xteink-x4-platformio/) (`src/ble/Cast.*`, `src/apps/BleApp.*`) | display (Xteink X4, e-paper), on `firmware/`: `mono1` and `gray2`, regions, keys up / down / select | v2 |
+| [`js/`](js/) | host library, plus a simulated display | v2 |
 | [`web/`](web/) | demo page: images, slideshows, live element capture | via `js/` |
 | [`chrome-extension/`](chrome-extension/) | blits a browser tab | via `js/` |
 | [`server/`](server/) | headless host (Node, headless Chromium, BLE via noble) | via `js/` |
@@ -491,12 +444,13 @@ Status, Data, commit, cancel, errors 1–8 and sleeping are the same as v2.
   the "you can send again" signal.
 - CRC the payload incrementally as it arrives, so commit doesn't need a second
   pass.
-- [`js/sim-display.js`](js/sim-display.js) is a complete v2 display in under
-  400 lines of JavaScript. Read it next to this spec.
+- [`firmware/`](firmware/) is a display in C++ for ESP32 with NimBLE, and
+  [`js/sim-display.js`](js/sim-display.js) a complete one in under 400 lines
+  of JavaScript. Read either next to this spec.
 
 ### Notes for host implementers
 
-- Parse caps from both v1 JSON and v2 TLV into one structure (see `parseCaps`
+- Parse caps into one structure with every default filled in (see `parseCaps`
   in [`js/protocol.js`](js/protocol.js)).
 - Render at `area` exactly. Pick the first entry of `formats` you can produce.
 - Hash each rendered frame and skip it if it hasn't changed. With regions,

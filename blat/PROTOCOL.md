@@ -935,7 +935,7 @@ In order; each step is usable by itself.
    Chromium against the simulated device.*
 4. **X4 firmware**: the [controls table](#declaring-controls-in-firmware)
    for its settings, the code screen, and a second GATT service next to
-   `CastServer`. *Done, except the QR code.*
+   the blit one. *Done, except the QR code.*
 5. **Server**: the host over BLE, a JSON API and the device page.
    *Done: [`server/`](server/), except per-user access and the audit log.*
 6. **Files**: `dir` control for the X4's SD images.

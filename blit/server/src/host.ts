@@ -146,8 +146,6 @@ export class BlitHost {
       if (!blit.connected) {
         opts.log(`Reconnecting to ${blit.deviceName ?? 'the display'}…`);
         await blit.reconnect({ timeoutMs: opts.reconnectTimeoutMs });
-      } else if (blit.caps!.version < 2) {
-        await blit.readCaps(); // v1 has no caps events: re-read before every frame
       }
       const caps = blit.caps!;
       const wait = this.#lastSentAt + caps.minIntervalMs - Date.now();

@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // The Bluetooth LE stack, on while the Bluetooth app is open: one NimBLE GATT
-// server carrying two services, blit (CastServer: frames in, keys out) and
+// server carrying two services, blit (Cast: frames in, keys out) and
 // blat (Remote: settings). One host connects at a time and may use either or
 // both.
 namespace radio {

@@ -10,6 +10,8 @@ display just copies bytes to its panel.
   protocols (VNC, RDP, Bluetooth ESL, OpenEPaperLink, TRMNL, ...) and what to
   take from them.
 - **[js/](js/)**: the host library (Web Bluetooth), and a simulated display.
+- **[firmware/](firmware/)**: the display library, in C++ for ESP32 and
+  NimBLE, with native tests against the host library.
 - **[web/](web/)**: demo page: send images and slideshows, and a webapp that
   blits one of its own elements.
 - **[chrome-extension/](chrome-extension/)**: blit any browser tab, or part
@@ -17,13 +19,15 @@ display just copies bytes to its panel.
 - **[server/](server/)**: a headless host in Node: renders a URL in headless
   Chromium and keeps a display up to date, from the command line.
 
-Displays: the [Xteink X4 firmware](../xteink-x4-platformio/) (Bluetooth app)
-speaks v2. The library speaks v1 and v2. The simulated display speaks both,
-so everything here can be tried without hardware.
+Everything here speaks protocol v2. Displays: the
+[Xteink X4 firmware](../xteink-x4-platformio/) (Bluetooth app), built on
+[`firmware/`](firmware/). The simulated display means everything can be tried
+without hardware.
 
 blit was called "ble-cast" until it grew button events and caps
-negotiation. The GATT UUIDs haven't changed, so existing displays still
-work.
+negotiation. The GATT UUIDs haven't changed, but v1 (ble-cast's JSON Info and
+short header) is no longer supported: the host library refuses a v1 display
+with an error asking for a firmware update.
 
 ## Run the web demo
 
@@ -114,7 +118,7 @@ blit.addEventListener('caps', (e) => console.log('now wants', e.detail.width, e.
 | `connect()` | Device chooser + connect. Needs a user gesture. |
 | `connectTransport(t)` | Connect over another transport: `new SimTransport(simDisplay)`, or `new WebBluetoothTransport(device)` for a device you already have (e.g. from `navigator.bluetooth.getDevices()`) |
 | `reconnect({ timeoutMs })` | Reconnect to the chosen display, retrying (e.g. while it sleeps) |
-| `caps` / `readCaps()` | The display's caps, normalised from v1 JSON or v2 TLV: `{ version, name, width, height, panel, formats, encodings, maxBytes, chunk, window, features, regionAlign, keys, minIntervalMs, refreshMs, battery }` |
+| `caps` / `readCaps()` | The display's caps, with defaults filled in: `{ version, name, width, height, panel, formats, encodings, maxBytes, chunk, window, features, regionAlign, keys, minIntervalMs, refreshMs, battery }` |
 | `preferredFormat()` | The first of `caps.formats` the library can render |
 | `sendImage(source, opts)` | Rasterize to the frame area (or `opts.width` × `opts.height`) and send |
 | `sendElement(element, opts)` | Capture a DOM element in place and send it (fit `contain` by default) |
@@ -135,9 +139,8 @@ when the display takes it and it helps), `refresh` (0 auto, 1 fast, 2 full),
 Frames are queued and sent one at a time. The send methods resolve with
 `{ sleepSeconds, skipped, region, bytes }` once the display has shown the
 frame. If `sleepSeconds` is above 0, the display is about to disconnect and
-sleep, and the next send reconnects. A v1 display gets v1 headers and 1-bit
-full frames. Region, encoding and format options are dropped or refused as
-needed.
+sleep, and the next send reconnects. Region and encoding options are dropped
+when the display doesn't take them; a format it doesn't take is refused.
 
 ### Simulated display
 
@@ -151,8 +154,7 @@ display.pressKey(KEY.DOWN);                       // -> 'key' event on the host
 display.setCaps({ width: 200, height: 150 });     // -> 'caps' event; next frame follows
 ```
 
-`SimDisplay` implements the display side of v2 (and v1 with `version: 1`):
-validation and error codes, flow control, streaming PackBits, regions with
+`SimDisplay` implements the display side of the protocol: validation and error codes, flow control, streaming PackBits, regions with
 `hold`, sleeping between frames. It's the reference for display implementers
 as much as a test tool.
 
@@ -160,12 +162,15 @@ as much as a test tool.
 
 ```sh
 node --test blit/js/test/*.test.mjs
+make -C blit/firmware/test
 ```
 
-These cover the codec (headers, caps TLV and v1 JSON, events, PackBits,
-CRC), pixel packing for every format, and a host talking to a simulated
-display end to end: v2 with PackBits, greyscale, regions, skipped frames,
-keys, caps changes, a v1 display, and error handling.
+The first covers the codec (headers, caps TLV, events, PackBits, CRC), pixel
+packing for every format, and a host talking to the simulated display end to
+end: PackBits, greyscale, regions, skipped frames, keys, caps changes,
+refusing v1 displays, and error handling. The second tests the firmware
+library, then runs the host library against it (see
+[firmware/README.md](firmware/README.md#tests)).
 
 ## Layout
 
@@ -175,8 +180,9 @@ js/blit.js              Blit (host): connection, sending, events; transports
 js/protocol.js          UUIDs, message encoding and parsing, CRC-32, PackBits
 js/raster.js            fit, greyscale, dither, pack to any format
 js/dom-capture.js       captureElement: DOM element -> canvas, in place
-js/sim-display.js       SimDisplay (a v1/v2 display in JS) and SimTransport
+js/sim-display.js       SimDisplay (a display in JS) and SimTransport
 js/test/                node --test
+firmware/               the display library (C++, ESP32 + NimBLE) and its tests
 web/                    demo page, and examples/clock/
 chrome-extension/       blit a browser tab (npm run dev / build)
 ```

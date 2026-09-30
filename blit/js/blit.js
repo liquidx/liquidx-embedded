@@ -1,6 +1,5 @@
 // blit host: send frames to a blit display and hear its buttons.
-// Spec: ../PROTOCOL.md. Speaks v2, and v1 to displays that only know v1 (the
-// X4 firmware today).
+// Spec: ../PROTOCOL.md (v2).
 //
 //   import { Blit } from './blit.js';
 //   const blit = new Blit();
@@ -80,20 +79,14 @@ export class WebBluetoothTransport {
     const server = await this.device.gatt.connect();
     const service = await server.getPrimaryService(SERVICE);
     const chars = {};
-    for (const key of ['info', 'control', 'data', 'status']) chars[key] = await service.getCharacteristic(CHARACTERISTIC[key]);
-    try {
-      chars.event = await service.getCharacteristic(CHARACTERISTIC.event);
-    } catch {
-      chars.event = null; // v1 display
+    for (const key of ['info', 'control', 'data', 'status', 'event']) {
+      chars[key] = await service.getCharacteristic(CHARACTERISTIC[key]);
     }
     chars.status.addEventListener('characteristicvaluechanged', this.#onStatus);
     await chars.status.startNotifications();
-    if (chars.event) {
-      chars.event.addEventListener('characteristicvaluechanged', this.#onEvent);
-      await chars.event.startNotifications();
-    }
+    chars.event.addEventListener('characteristicvaluechanged', this.#onEvent);
+    await chars.event.startNotifications();
     this.#chars = chars;
-    return { hasEvents: !!chars.event };
   }
 
   readInfo() {
@@ -118,7 +111,6 @@ export class WebBluetoothTransport {
 
 export class Blit extends EventTarget {
   #transport = null;
-  #hasEvents = false;
   #waiters = [];
   #backlog = []; // statuses that arrived before anyone waited for them
   #queue = Promise.resolve();
@@ -141,11 +133,6 @@ export class Blit extends EventTarget {
 
   get deviceName() {
     return this.#transport?.name ?? this.caps?.name ?? null;
-  }
-
-  /** v1 name for caps. */
-  get info() {
-    return this.caps;
   }
 
   /** Pick a display (browser chooser) and connect. Call from a user gesture. */
@@ -210,7 +197,7 @@ export class Blit extends EventTarget {
    */
   async sendImage(source, opts = {}) {
     await this.#ensureConnected(opts);
-    const caps = this.caps.version < 2 ? await this.readCaps() : this.caps; // v1 has no caps events
+    const caps = this.caps;
     const format = opts.format ?? this.preferredFormat();
     const frame = rasterize(source, { width: caps.width, height: caps.height, ...opts, format });
     opts.onRaster?.(frame);
@@ -253,8 +240,6 @@ export class Blit extends EventTarget {
     const { format = FORMAT.MONO1, width, height, skipUnchanged = false, regions = false } = opts;
     await this.#ensureConnected(opts);
     const caps = this.caps;
-    const v1 = caps.version < 2;
-    if (v1 && format !== FORMAT.MONO1) throw new Error('This display only takes mono1 (protocol v1)');
     const expected = frameBytes(format, width, height);
     if (pixels.length !== expected) throw new Error(`Expected ${expected} bytes for that frame, got ${pixels.length}`);
 
@@ -267,7 +252,7 @@ export class Blit extends EventTarget {
       const changed = changedRect(last.pixels, pixels, format, width, height, caps.regionAlign || 8);
       if (!changed && skipUnchanged) return { sleepSeconds: 0, skipped: true };
       // A region only pays off when it's clearly smaller than the frame.
-      if (changed && regions && !v1 && caps.regionAlign && changed.width * changed.height < width * height * 0.6) {
+      if (changed && regions && caps.regionAlign && changed.width * changed.height < width * height * 0.6) {
         region = changed;
         payload = cropPixels(pixels, format, width, changed);
       }
@@ -277,7 +262,7 @@ export class Blit extends EventTarget {
     let encoding = ENCODING.NONE;
     let wire = payload;
     const wantEncoding = opts.encoding ?? 'auto';
-    if (!v1 && wantEncoding !== ENCODING.NONE && caps.encodings.includes(ENCODING.PACKBITS)) {
+    if (wantEncoding !== ENCODING.NONE && caps.encodings.includes(ENCODING.PACKBITS)) {
       const packed = packbits(payload);
       if (wantEncoding === ENCODING.PACKBITS || packed.length < payload.length * 0.9) {
         encoding = ENCODING.PACKBITS;
@@ -290,7 +275,6 @@ export class Blit extends EventTarget {
     }
 
     const header = encodeBegin({
-      version: v1 ? 1 : 2,
       format,
       encoding,
       persist: !!opts.persist,
@@ -362,16 +346,18 @@ export class Blit extends EventTarget {
   }
 
   async #open() {
-    const { hasEvents } = await this.#transport.open({
+    await this.#transport.open({
       onStatus: this.#onStatus,
       onEvent: this.#onEvent,
       onDisconnect: this.#onDisconnected,
     });
-    this.#hasEvents = hasEvents;
-    await this.readCaps();
-    if (this.caps.version >= 2 && hasEvents) {
-      await this.#transport.control(encodeHello({ name: this.hostName }));
+    try {
+      await this.readCaps();
+    } catch (err) {
+      this.#transport.close();
+      throw err;
     }
+    await this.#transport.control(encodeHello({ name: this.hostName }));
     this.dispatchEvent(new CustomEvent('connected', { detail: this.caps }));
   }
 

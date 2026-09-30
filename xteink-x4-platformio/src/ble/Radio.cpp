@@ -4,7 +4,7 @@
 
 #include <cstdio>
 
-#include "CastServer.h"
+#include "Cast.h"
 #include "Radio.h"
 #include "Remote.h"
 
@@ -29,13 +29,13 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     const uint16_t conn = info.getConnHandle();
     gatt->updateConnParams(conn, 12, 24, 0, 400);
     gatt->setDataLen(conn, 251);
-    cast::server.onConnect(conn);
+    cast::link().onConnect(conn);
     remote::link().onConnect(conn);
     LOG_INF("BLE", "Connected");
   }
   void onDisconnect(NimBLEServer*, NimBLEConnInfo&, int reason) override {
     LOG_INF("BLE", "Disconnected (reason %d)", reason);
-    cast::server.onDisconnect();
+    cast::link().onDisconnect();
     remote::link().onDisconnect();
     NimBLEDevice::startAdvertising();
   }
@@ -75,7 +75,7 @@ bool begin() {
 
   NimBLEServer* gatt = NimBLEDevice::createServer();
   gatt->setCallbacks(&serverCallbacks, false);
-  cast::server.attach(gatt);
+  cast::link().addService(gatt);
   remote::link().addService(gatt);
   gatt->start();
 
@@ -83,7 +83,7 @@ bool begin() {
   // blat UUID doesn't fit, so NimBLE puts it in the scan response, which
   // hosts filtering on it still see (they scan actively).
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-  adv->addServiceUUID(cast::kServiceUuid);
+  adv->addServiceUUID(blit::kServiceUuid);
   adv->setName(name());
   adv->addServiceUUID(blat::kServiceUuid);
   adv->enableScanResponse(true);
@@ -99,7 +99,7 @@ bool begin() {
 
 void end() {
   NimBLEDevice::deinit(true);  // disconnects, stops advertising, frees the stack
-  cast::server.detach();
+  cast::link().reset();
   remote::link().reset();
   if (running_) LOG_INF("BLE", "Stopped");
   running_ = false;

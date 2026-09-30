@@ -12,7 +12,7 @@
 
 import {
   ENCODING, ERROR, FORMAT, FORMAT_INFO, HELLO_FLAG, KEY, KEY_ACTION, OP, POINTER_ACTION, PackBitsDecoder, STATUS,
-  crc32, encodeCaps, encodeCapsEvent, encodeKeyEvent, encodePointerEvent, encodeStatus, frameBytes, parseBegin,
+  VERSION, crc32, encodeCaps, encodeCapsEvent, encodeKeyEvent, encodePointerEvent, encodeStatus, frameBytes, parseBegin,
 } from './protocol.js';
 import { unpackLevels } from './raster.js';
 
@@ -24,35 +24,33 @@ export class SimDisplay extends EventTarget {
   /**
    * Options: name, width, height (frame area), panelWidth, panelHeight,
    * formats, encodings, maxBytes, chunk, window, regionAlign (0 = none), keys,
-   * pointer, frameSleep, minIntervalMs, refreshMs (how long "showing" takes),
-   * version (1 = behave like the X4 firmware today).
+   * pointer, frameSleep, minIntervalMs, refreshMs (how long "showing" takes).
    */
   constructor({
     name = 'blit-sim', width = 400, height = 300, panelWidth, panelHeight,
     formats = [FORMAT.MONO1, FORMAT.GRAY2, FORMAT.GRAY4], encodings = [ENCODING.PACKBITS],
     maxBytes = 512 * 1024, chunk = 244, window = 16, regionAlign = 8,
     keys = [KEY.UP, KEY.DOWN, KEY.LEFT, KEY.RIGHT, KEY.SELECT, KEY.PAGE_NEXT, KEY.PAGE_PREV],
-    pointer = true, frameSleep = false, minIntervalMs = 0, refreshMs = 250, version = 2,
+    pointer = true, frameSleep = false, minIntervalMs = 0, refreshMs = 250,
   } = {}) {
     super();
-    this.version = version;
     this.caps = {
-      version,
+      version: VERSION,
       name,
       panel: { width: panelWidth ?? width, height: panelHeight ?? height },
       width,
       height,
-      formats: version < 2 ? [FORMAT.MONO1] : formats,
-      encodings: version < 2 ? [] : encodings,
+      formats,
+      encodings,
       maxBytes,
       chunk,
       window,
-      features: { persist: true, frameSleep, fastRefresh: version >= 2, pointer: version >= 2 && pointer },
-      regionAlign: version < 2 ? 0 : regionAlign,
-      keys: version < 2 ? [] : keys,
+      features: { persist: true, frameSleep, fastRefresh: true, pointer },
+      regionAlign,
+      keys,
       minIntervalMs,
       refreshMs,
-      battery: version < 2 ? null : { percent: 87, charging: false, external: false },
+      battery: { percent: 87, charging: false, external: false },
     };
     this.#resize();
     this.frames = 0;
@@ -72,16 +70,9 @@ export class SimDisplay extends EventTarget {
 
   // --- what a host sees ---------------------------------------------------------
 
-  /** Info characteristic value: v2 TLV caps, or v1 JSON. */
+  /** Info characteristic value: the caps as TLV. */
   info() {
-    const c = this.caps;
-    if (this.version < 2) {
-      return new TextEncoder().encode(JSON.stringify({
-        v: 1, name: c.name, w: c.width, h: c.height, fullW: c.panel.width, fullH: c.panel.height,
-        chunk: c.chunk, window: c.window, maxBytes: c.maxBytes, formats: [1], frameSleep: c.features.frameSleep,
-      }));
-    }
-    return encodeCaps(c);
+    return encodeCaps(this.caps);
   }
 
   /** Change caps (e.g. { width, height } or { formats }) and tell the host. */
@@ -137,7 +128,6 @@ export class SimDisplay extends EventTarget {
         this.#rx = null;
         return undefined;
       case OP.HELLO:
-        if (this.version < 2) return this.#error(ERROR.BAD_HEADER, bytes[0]);
         this.#wants = { keys: !!(bytes[2] & HELLO_FLAG.KEYS), pointer: !!(bytes[2] & HELLO_FLAG.POINTER) };
         this.#log(`Hello from ${new TextDecoder().decode(bytes.subarray(4, 4 + bytes[3])) || 'a host'} (v${bytes[1]})`);
         return this.#event(encodeCapsEvent(this.caps));
@@ -169,7 +159,7 @@ export class SimDisplay extends EventTarget {
     const h = parseBegin(bytes);
     if (!h) return this.#error(ERROR.BAD_HEADER);
     const c = this.caps;
-    if (h.version < 1 || h.version > this.version) return this.#error(ERROR.UNSUPPORTED, h.version);
+    if (h.version !== VERSION) return this.#error(ERROR.UNSUPPORTED, h.version);
     if (!c.formats.includes(h.format) || !FORMAT_INFO[h.format]) return this.#error(ERROR.UNSUPPORTED, h.format);
     if (h.encoding !== ENCODING.NONE && !c.encodings.includes(h.encoding)) return this.#error(ERROR.UNSUPPORTED, h.encoding);
     if (!h.width || !h.height || h.width > 4096 || h.height > 4096) return this.#error(ERROR.BAD_HEADER);
@@ -300,7 +290,7 @@ export class SimDisplay extends EventTarget {
   #event(bytes) {
     // Like a BLE display: only to a subscribed host, never queued.
     const link = this.#link;
-    if (link && this.version >= 2) setTimeout(() => link.event(bytes), 0);
+    if (link) setTimeout(() => link.event(bytes), 0);
   }
 
   #log(text) {
@@ -332,7 +322,6 @@ export class SimTransport {
     });
     this.#connected = true;
     this.handlers = handlers;
-    return { hasEvents: this.display.version >= 2 };
   }
 
   async readInfo() {

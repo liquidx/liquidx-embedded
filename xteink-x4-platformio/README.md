@@ -156,7 +156,9 @@ src/
     BleApp.*          Bluetooth remote screen
     SettingsApp.*     settings list, choice pages, About
   ble/
-    CastServer.*      BLE GATT server for the blit protocol (v2)
+    Cast.*            the X4 as a blit display (on blit/firmware)
+    Remote.*          the X4 as a blat device (on blat/firmware)
+    Radio.*           the NimBLE server both share
   Settings.*          persisted settings (NVS) and their options
 fonts/                IBM Plex Mono TTFs (OFL); scripts/fonts.sh turns them into headers
 docs/design/          visual spec and mockups
@@ -192,13 +194,14 @@ Transfer failed; a Bluetooth badge in the corner marks a frame as live.
 - **Settings → Frame sleep** (off by default): when a sender says when its next
   frame is due, the X4 Classic deep-sleeps until just before it, frame left on
   screen, then wakes back into the Bluetooth app. Gaps under 30 s don't sleep.
-  The original X4 can't wake on a timer, so it stays awake.
+  The original X4 can't wake on a timer, so it stays awake and doesn't offer
+  frame sleep to senders.
 
-Wire format: the [blit protocol](../blit/PROTOCOL.md), v2: `mono1` and
-`gray2` (X4 Classic only), PackBits, regions, key and battery events. It
-still accepts v1 frame headers, but Info is v2 caps, so senders need the
-current blit library. The receiver is `src/ble/CastServer.*` (NimBLE) and
-`src/apps/BleApp.*`; the grey refresh is `Shell::presentGray`.
+Wire format: the [blit protocol](../blit/PROTOCOL.md), v2 only: `mono1` and
+`gray2` (X4 Classic only), PackBits, regions, key and battery events. The
+protocol is the [blit firmware library](../blit/firmware/); `src/ble/Cast.*`
+declares the X4 to it, and `src/apps/BleApp.*` shows the frames, saves them
+and handles the keys. The grey refresh is `Shell::presentGray`.
 
 ### Settings over Bluetooth (blat)
 

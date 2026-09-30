@@ -8,7 +8,7 @@ export const CHARACTERISTIC = {
   control: 'b1ec0002-5f3a-4e62-9a47-0c3d8e5f2a10',
   data: 'b1ec0003-5f3a-4e62-9a47-0c3d8e5f2a10',
   status: 'b1ec0004-5f3a-4e62-9a47-0c3d8e5f2a10',
-  event: 'b1ec0005-5f3a-4e62-9a47-0c3d8e5f2a10', // v2
+  event: 'b1ec0005-5f3a-4e62-9a47-0c3d8e5f2a10',
 };
 
 export const VERSION = 2;
@@ -49,7 +49,7 @@ export const ERROR_TEXT = {
   10: "payload didn't decode to the frame size",
 };
 
-// Event characteristic (v2).
+// Event characteristic.
 export const EVENT = { CAPS: 0x01, KEY: 0x02, POINTER: 0x03, POWER: 0x04 };
 export const KEY = {
   UP: 1, DOWN: 2, LEFT: 3, RIGHT: 4, SELECT: 5, BACK: 6, MENU: 7, HOME: 8, PAGE_NEXT: 9, PAGE_PREV: 10,
@@ -71,8 +71,7 @@ export const TAG = {
 };
 export const FEATURE = { PERSIST: 1 << 0, FRAME_SLEEP: 1 << 1, FAST_REFRESH: 1 << 2, POINTER: 1 << 3 };
 
-const V1_HEADER_BYTES = 21;
-const V2_HEADER_BYTES = 29;
+const HEADER_BYTES = 29;
 const MAX_NAME = 64;
 const MAX_HOST_NAME = 32;
 
@@ -97,36 +96,17 @@ function asciiBytes(text, max) {
   return Uint8Array.from([...text].slice(0, max), (c) => (c.charCodeAt(0) < 0x80 ? c.charCodeAt(0) : 0x5f));
 }
 
-/**
- * Control write that starts a frame. `version` 1 writes the 21-byte v1 header
- * (mono1, full frames, no encoding); 2 writes the v2 header.
- */
+/** Control write that starts a frame. */
 export function encodeBegin({
   version = VERSION, format = FORMAT.MONO1, encoding = ENCODING.NONE, persist = false, region = false, hold = false,
   refresh = REFRESH.AUTO, width, height, x = 0, y = 0, byteLength, crc, nextFrameSeconds = 0, name = '',
 }) {
   const nameBytes = asciiBytes(name, MAX_NAME);
   const next = Math.max(0, Math.round(nextFrameSeconds));
-  if (version === 1) {
-    const out = new Uint8Array(V1_HEADER_BYTES + nameBytes.length);
-    const v = new DataView(out.buffer);
-    v.setUint8(0, OP.BEGIN);
-    v.setUint8(1, 1);
-    v.setUint8(2, format);
-    v.setUint8(3, persist ? FLAG.PERSIST : 0);
-    v.setUint16(4, width, true);
-    v.setUint16(6, height, true);
-    v.setUint32(8, byteLength, true);
-    v.setUint32(12, crc, true);
-    v.setUint32(16, next, true);
-    v.setUint8(20, nameBytes.length);
-    out.set(nameBytes, V1_HEADER_BYTES);
-    return out;
-  }
-  const out = new Uint8Array(V2_HEADER_BYTES + nameBytes.length);
+  const out = new Uint8Array(HEADER_BYTES + nameBytes.length);
   const v = new DataView(out.buffer);
   v.setUint8(0, OP.BEGIN);
-  v.setUint8(1, 2);
+  v.setUint8(1, version);
   v.setUint8(2, format);
   v.setUint8(3, encoding);
   v.setUint8(4, (persist ? FLAG.PERSIST : 0) | (region ? FLAG.REGION : 0) | (hold ? FLAG.HOLD : 0));
@@ -139,38 +119,29 @@ export function encodeBegin({
   v.setUint32(20, crc, true);
   v.setUint32(24, next, true);
   v.setUint8(28, nameBytes.length);
-  out.set(nameBytes, V2_HEADER_BYTES);
+  out.set(nameBytes, HEADER_BYTES);
   return out;
 }
 
-/** Parse a begin header (either version). Used by displays; null if malformed. */
+/** Parse a begin header. Used by displays; null if malformed. */
 export function parseBegin(bytes) {
   if (bytes.length < 2 || bytes[0] !== OP.BEGIN) return null;
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const text = (from, n) => String.fromCharCode(...bytes.subarray(from, from + n));
-  if (bytes[1] === 1) {
-    if (bytes.length < V1_HEADER_BYTES || bytes.length < V1_HEADER_BYTES + bytes[20]) return null;
-    return {
-      version: 1, format: bytes[2], encoding: 0, persist: !!(bytes[3] & FLAG.PERSIST), region: false, hold: false,
-      refresh: 0, width: v.getUint16(4, true), height: v.getUint16(6, true), x: 0, y: 0,
-      byteLength: v.getUint32(8, true), crc: v.getUint32(12, true), nextFrameSeconds: v.getUint32(16, true),
-      name: text(V1_HEADER_BYTES, Math.min(bytes[20], MAX_NAME)),
-    };
-  }
-  if (bytes.length < V2_HEADER_BYTES || bytes.length < V2_HEADER_BYTES + bytes[28]) return null;
+  if (bytes.length < HEADER_BYTES || bytes.length < HEADER_BYTES + bytes[28]) return null;
   return {
     version: bytes[1], format: bytes[2], encoding: bytes[3], persist: !!(bytes[4] & FLAG.PERSIST),
     region: !!(bytes[4] & FLAG.REGION), hold: !!(bytes[4] & FLAG.HOLD), refresh: bytes[5],
     width: v.getUint16(6, true), height: v.getUint16(8, true), x: v.getUint16(10, true), y: v.getUint16(12, true),
     byteLength: v.getUint32(16, true), crc: v.getUint32(20, true), nextFrameSeconds: v.getUint32(24, true),
-    name: text(V2_HEADER_BYTES, Math.min(bytes[28], MAX_NAME)),
+    name: text(HEADER_BYTES, Math.min(bytes[28], MAX_NAME)),
   };
 }
 
 export const COMMIT = Uint8Array.of(OP.COMMIT);
 export const CANCEL = Uint8Array.of(OP.CANCEL);
 
-/** Control write introducing the host (v2). */
+/** Control write introducing the host. */
 export function encodeHello({ version = VERSION, keys = true, pointer = true, name = '' } = {}) {
   let nameBytes = new TextEncoder().encode(name);
   if (nameBytes.length > MAX_HOST_NAME) nameBytes = nameBytes.subarray(0, MAX_HOST_NAME);
@@ -220,7 +191,7 @@ export function parseStatus(data) {
 /** Caps with every default filled in. */
 export function defaultCaps() {
   return {
-    version: 1,
+    version: VERSION,
     name: '',
     panel: null,
     width: 0,
@@ -240,28 +211,16 @@ export function defaultCaps() {
 }
 
 /**
- * Parse Info (or a caps event body) into one normalised structure, whichever
- * version the display speaks: v1 JSON or v2 TLV.
+ * Parse Info (or a caps event body) into one normalised structure, with every
+ * default filled in. Throws for a display that doesn't speak v2 or later
+ * (v1 displays sent JSON, starting with `{`).
  */
 export function parseCaps(data) {
   const bytes = bytesOf(view(data));
   const caps = defaultCaps();
-  if (bytes[0] === 0x7b) {
-    const j = JSON.parse(new TextDecoder().decode(bytes));
-    caps.version = j.v ?? 1;
-    caps.name = j.name ?? '';
-    caps.width = j.w;
-    caps.height = j.h;
-    caps.panel = { width: j.fullW ?? j.w, height: j.fullH ?? j.h };
-    caps.formats = j.formats?.length ? j.formats : [FORMAT.MONO1];
-    caps.maxBytes = j.maxBytes ?? 0;
-    caps.chunk = j.chunk ?? 0;
-    caps.window = j.window ?? 0;
-    caps.features.persist = true;
-    caps.features.frameSleep = !!j.frameSleep;
-    return caps;
+  if (!(bytes[0] >= VERSION) || bytes[0] === 0x7b) {
+    throw new Error(`This display speaks blit v${bytes[0] === 0x7b ? 1 : bytes[0]}; this host needs v${VERSION}`);
   }
-
   caps.version = bytes[0];
   const v = view(bytes);
   for (let i = 1; i + 2 <= bytes.length; ) {
