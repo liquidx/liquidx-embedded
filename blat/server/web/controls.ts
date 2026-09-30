@@ -73,7 +73,7 @@ function lockNote(c: Control, ctx: ControlContext): HTMLElement | null {
   if (canWrite(c, ctx.level)) return null;
   const need = Math.max(1, c.write);
   const text = need >= 2 ? 'Needs a fresh code from the device' : 'Pair to change';
-  return h('button', { type: 'button', class: 'lock', title: `Access level ${need}`, onclick: () => ctx.pair() }, `🔒 ${text}`);
+  return h('button', { type: 'button', class: 'lock', title: `Access level ${need}`, onclick: () => ctx.pair() }, text);
 }
 
 // --- Rows ----------------------------------------------------------------------------
@@ -117,7 +117,7 @@ function input(c: Control, value: Value | undefined, writable: boolean, commit: 
   const id = `c${c.id}`;
   switch (c.type) {
     case 'bool': {
-      const box = h('input', { id, type: 'checkbox', class: 'switch', checked: !!value, disabled: !writable, onchange: () => commit(box.checked ? 1 : 0) });
+      const box = h('input', { id, type: 'checkbox', checked: !!value, disabled: !writable, onchange: () => commit(box.checked ? 1 : 0) });
       return { el: box, update: (v) => (box.checked = !!v) };
     }
     case 'enum':
@@ -135,13 +135,14 @@ function input(c: Control, value: Value | undefined, writable: boolean, commit: 
 
 function choice(c: Control, value: Value | undefined, writable: boolean, commit: (v: Value) => void): Widget {
   const id = `c${c.id}`;
-  if (c.options.length <= 4) {
-    // A few options: a segmented control.
-    const buttons = c.options.map((o) =>
-      h('button', { type: 'button', 'aria-pressed': String(o.value === value), disabled: !writable, onclick: () => commit(o.value) }, o.label),
+  if (c.options.length <= 8) {
+    // Up to a handful of options: a list of radio buttons.
+    const radios = c.options.map((o) =>
+      h('input', { type: 'radio', name: id, value: String(o.value), checked: o.value === value, disabled: !writable, onchange: () => commit(o.value) }),
     );
-    const el = h('div', { id, class: 'segmented', role: 'group', 'aria-label': c.label }, ...buttons);
-    const update = (v: Value | undefined) => c.options.forEach((o, i) => buttons[i].setAttribute('aria-pressed', String(o.value === v)));
+    const el = h('div', { id, class: 'choices', role: 'radiogroup', 'aria-label': c.label },
+      ...c.options.map((o, i) => h('label', {}, radios[i], o.label)));
+    const update = (v: Value | undefined) => c.options.forEach((o, i) => (radios[i].checked = o.value === v));
     return { el, update };
   }
   const select = h('select', { id, disabled: !writable, onchange: () => commit(Number(select.value)) },

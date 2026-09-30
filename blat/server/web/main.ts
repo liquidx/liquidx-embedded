@@ -45,12 +45,10 @@ function renderDevices() {
     for (const d of state.devices) {
       list.append(
         h('li', {},
-          h('button', { type: 'button', class: 'device', 'aria-current': d.id === state.selected ? 'true' : null, onclick: () => select(d.id) },
-            h('span', { class: 'name' }, d.name),
-            h('span', { class: 'meta' },
-              d.connected ? h('span', { class: `badge level-${d.level}` }, levelName(d.level)) : h('span', { class: 'muted' }, 'Not connected'),
-              d.rssi !== null ? h('span', { class: 'muted' }, `${d.rssi} dBm`) : null,
-            ),
+          h('button', { type: 'button', class: 'device', 'aria-current': d.id === state.selected ? 'true' : null, onclick: () => select(d.id) }, d.name),
+          h('span', { class: 'meta' },
+            d.connected ? h('span', { class: `level-${d.level}` }, levelName(d.level)) : h('span', { class: 'muted' }, 'Not connected'),
+            d.rssi !== null ? h('span', { class: 'muted' }, `${d.rssi} dBm`) : null,
           ),
         ),
       );
@@ -102,7 +100,7 @@ function renderDevice() {
   state.form = null;
   const id = state.selected;
   if (!id) {
-    $device.replaceChildren(h('p', { class: 'muted empty' }, 'Pick a device.'));
+    $device.replaceChildren();
     return;
   }
   const d = state.device;

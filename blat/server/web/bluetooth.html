@@ -3,16 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#08080a" />
     <title>blat over Web Bluetooth</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link href="https://fonts.googleapis.com/css2?family=Spline+Sans+Mono:wght@400;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <header class="top">
-      <h1>blat</h1>
-      <span class="sub">settings over Web Bluetooth, straight from this browser</span>
+      <div class="rail">
+        <h1><a href="./bluetooth.html">blat</a></h1>
+        <span class="sep" aria-hidden="true">/</span>
+        <span class="sub">web bluetooth</span>
+      </div>
     </header>
-    <main class="single">
+    <main>
       <section id="device" aria-live="polite"></section>
     </main>
     <div id="toast" role="status" hidden></div>

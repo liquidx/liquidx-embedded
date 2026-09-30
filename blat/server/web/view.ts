@@ -42,7 +42,7 @@ export function renderDeviceView(el: HTMLElement, d: DeviceView, actions: Device
     h('header', { class: 'device-head' },
       h('div', {}, h('h2', {}, d.name), h('p', { class: 'muted' }, d.details.filter(Boolean).join(' · '))),
       h('div', { class: 'actions' },
-        h('span', { class: `badge level-${d.level}` }, levelName(d.level)),
+        h('span', { class: `level-${d.level}` }, levelName(d.level)),
         d.level < 2 && !d.pairing ? h('button', { type: 'button', onclick: () => actions.pair() }, d.level === 0 ? 'Pair' : 'Enter a code') : null,
         d.remembered ? h('button', { type: 'button', class: 'quiet', title: 'Stop reconnecting without a code', onclick: () => actions.forget() }, 'Forget') : null,
         h('button', { type: 'button', class: 'quiet', onclick: () => actions.disconnect() }, 'Disconnect'),

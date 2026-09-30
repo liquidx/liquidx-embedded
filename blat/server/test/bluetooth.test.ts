@@ -165,7 +165,7 @@ test('pair, change settings, see live values, reconnect without a code', { skip:
   assert.equal(await page.locator('[data-key="device.name"] input').inputValue(), 'Sim');
 
   // Settings, checked on the device side through a fresh value read.
-  await page.locator('[data-key="display.mode"] button', { hasText: 'Full' }).click();
+  await page.locator('[data-key="display.mode"]').getByLabel('Full').check();
   await page.locator('[data-key="display.mode"] .status', { hasText: 'Saved' }).waitFor();
   await page.locator('[data-key="wifi.password"] input').fill('correct horse');
   await page.locator('[data-key="wifi.password"] button').click();
@@ -180,7 +180,7 @@ test('pair, change settings, see live values, reconnect without a code', { skip:
   await page.getByRole('button', { name: 'Disconnect' }).click();
   await page.getByRole('button', { name: 'Reconnect' }).click();
   await page.getByText('Paired', { exact: true }).first().waitFor();
-  assert.equal(await page.locator('[data-key="display.mode"] button[aria-pressed="true"]').textContent(), 'Full');
+  assert.equal(await page.locator('[data-key="display.mode"]').getByLabel('Full').isChecked(), true);
   assert.ok(await page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('blat.host.'))));
 
   assert.deepEqual((page as unknown as { errors: string[] }).errors, []);
