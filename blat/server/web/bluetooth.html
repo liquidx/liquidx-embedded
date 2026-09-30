@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>blat over Web Bluetooth</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>blat</h1>
+      <span class="sub">settings over Web Bluetooth, straight from this browser</span>
+    </header>
+    <main class="single">
+      <section id="device" aria-live="polite"></section>
+    </main>
+    <div id="toast" role="status" hidden></div>
+    <script type="module" src="./bluetooth.ts"></script>
+  </body>
+</html>
