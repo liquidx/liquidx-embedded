@@ -86,6 +86,17 @@ struct Option {
 // Fields end in `_` and are for the library to read; declarations use the
 // setters.
 struct Control {
+ private:
+  // Before the setters that use it: clang won't evaluate a member template
+  // in a constant expression ahead of its definition.
+  template <typename F>
+  constexpr Control with(F set) const {
+    Control c = *this;
+    set(c);
+    return c;
+  }
+
+ public:
   const char* key_ = nullptr;  // stable, dotted: "display.refresh"
   Type type_ = Type::Group;
   const char* label_ = nullptr;
@@ -186,12 +197,6 @@ struct Control {
   constexpr bool isText() const { return type_ == Type::Text || type_ == Type::Secret; }
 
  private:
-  template <typename F>
-  constexpr Control with(F set) const {
-    Control c = *this;
-    set(c);
-    return c;
-  }
   constexpr Control flagged(uint16_t f) const { return with([&](Control& c) { c.flags_ |= f; }); }
 };
 

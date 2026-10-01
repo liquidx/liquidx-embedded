@@ -1,0 +1,44 @@
+#pragma once
+
+#include "../ble/Cast.h"
+#include "../shell/App.h"
+
+// A remote screen over Bluetooth LE (blit/PROTOCOL.md at the repo root). While
+// open, the device advertises and shows the last frame it received, or
+// "Listening". The title pill shows the link status. Down / Select go to
+// the host; Back leaves the app, which turns the radio off.
+//
+// While open it also takes settings from a paired blat host (blat/PROTOCOL.md),
+// and shows the pairing code when a new host asks for one.
+class BleApp : public App {
+ public:
+  const char* name() const override { return "Bluetooth"; }
+  ui::Icon icon() const override { return ui::Icon::Bluetooth; }
+  void onOpen() override;
+  void onClose() override;
+  void render(Gfx& g, const layout::Rect& area, bool chrome) override;
+  Result handle(Action action) override;
+  Result tick() override;
+  void presented() override;
+  bool takeActivity() override;
+
+ private:
+  enum class Status : uint8_t { Unavailable, Listening, Connected, Receiving, Waiting, Failed };
+
+  Status status() const;
+  void statusText(char* out, size_t size) const;
+  Result showFrame(const blit::FrameHeader& header);
+  void pollBattery();
+  void drawFrame(Gfx& g, const layout::Rect& area) const;
+  void renderCode(Gfx& g, const layout::Rect& area, bool chrome, const char* code);
+
+  blit::Buffer frame_;         // the last full frame received, pixels as sent
+  blit::Buffer region_;        // the last region received
+  blit::FrameHeader header_;   // ...the full frame's header
+  bool haveFrame_ = false;
+  bool showingFrame_ = false;  // the last render drew a frame, not "Listening"
+  bool chrome_ = true;         // the last render had chrome
+  Status shownStatus_ = Status::Unavailable;  // what the screen shows now
+  uint32_t nextSeconds_ = 0;   // the last frame's next-frame hint
+  uint32_t lastBatteryPollMs_ = 0;
+};

@@ -10,6 +10,7 @@ README, build config, and helper scripts.
 | --- | --- | --- | --- |
 | [`m5stack-resident/`](m5stack-resident/) | M5StickS3 (ESP32-S3) | PlatformIO + [Resident](https://resident.inanimate.tech/) | Lua apps pushed over the Resident relay |
 | [`xteink-x4-platformio/`](xteink-x4-platformio/) | Xteink X4 (ESP32-C3, e-paper) | PlatformIO + [FreeInk SDK](https://github.com/Free-Ink/freeink-sdk) | Landscape shell firmware: image viewer, Bluetooth receiver, settings |
+| [`m5stack-platformio/`](m5stack-platformio/) | M5StickS3 (ESP32-S3, colour LCD) | PlatformIO + [M5Unified](https://github.com/m5stack/M5Unified) | The X4 shell in colour: clock, Bluetooth receiver, settings. Built, not yet run on hardware |
 
 ## Shared protocols
 
