@@ -10,10 +10,6 @@ screen (date, clock, apps), Bluetooth remote screen and Settings, redrawn for a
 Those are rendered from the firmware's own drawing code on a computer (see
 [Screens without a device](#screens-without-a-device)).
 
-**Status: builds, not yet run on hardware.** Everything above the board layer
-is exercised by the renderer; the parts only a device can check are listed
-under [Status / next](#status--next).
-
 ## Hardware
 
 - **M5StickS3**: ESP32-S3-PICO-1-N8R8 (8MB flash, 8MB PSRAM), 1.14" 135 × 240
@@ -60,6 +56,17 @@ pio run                     # build
 pio run -t upload           # flash (replaces whatever is on the stick)
 pio device monitor          # serial log (115200)
 ```
+
+**The first flash**, over another firmware:
+
+1. Hold the power key (bottom edge) for a few seconds, until the LED blinks:
+   the stick is in flash mode.
+2. `pio run -t upload`
+3. Double press the power key to turn the stick off, then press it once to
+   turn it back on. It boots into the new firmware.
+
+Once this firmware is running, `pio run -t upload` works as it is: no flash
+mode, no power cycle.
 
 Driving it from the Mac over USB (needs `pyserial`; `shot` needs Pillow):
 
@@ -125,9 +132,8 @@ To add an app, subclass `App`, then `shell.addApp(&myApp)` in `main.cpp` (and
 - [x] Builds for the StickS3 (about 1 MB)
 - [x] Home, Settings, Bluetooth, rendered and checked in the simulator
 - [x] blit frames in `rgb565` and the grey formats, through the real receiver
-- [ ] First run on hardware. To check there: screen rotation and which way
-      round the keys sit beside the gutter; how the double press feels;
-      battery, charging and USB readings; waking from sleep with the
-      front key; a real blit and blat session
+- [x] Runs on the StickS3: the shell and both keys
+- [ ] Still to check on the device: battery, charging and USB readings;
+      waking from sleep with the front key; a real blit and blat session
 - [ ] Set the clock over blat (`time.now`), so it doesn't need the serial port
 - [ ] Something for the IMU, speaker and microphone to do

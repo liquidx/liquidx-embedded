@@ -8,6 +8,8 @@ external/
 
 # PlatformIO
 .pio/
+# written into src/ by pioarduino builds
+idf_component.yml
 
 # CMake / ESP-IDF / Pico SDK / Zephyr build output
 build/
